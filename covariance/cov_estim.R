@@ -1,8 +1,10 @@
-source("/Users/swang/Dropbox/research_code/generation_klutchnikoff.R")
-source("/Users/swang/Dropbox/research_code/H_and_L_functions.R")
-source("/Users/swang/Dropbox/research_code/mean_optimised.R")
-source("/Users/swang/Dropbox/research_code/cov_optimised.R")
-source("/Users/swang/Dropbox/research_code/utils.R")
+#import dependent scripts
+source("/Users/swang/Dropbox/funeigen/generation/generation_klutchnikoff.R")
+source("/Users/swang/Dropbox/funeigen/regularity/H_and_L_functions.R")
+source("/Users/swang/Dropbox/funeigen/mean/mean_optimised.R")
+source("/Users/swang/Dropbox/funeigen/covariance/cov_optimised.R")
+source("/Users/swang/Dropbox/funeigen/utils/utils.R")
+
 
 library(dplyr)
 library(purrr)
@@ -13,8 +15,8 @@ library(fs)
 library(doParallel)
 library(functional)
 #parameters
-N <- 25
-M <- 25
+N <- 50
+M <- 30
 H <- c(0.5, 0.8)
 sigma <- 0.1
 L <- 1
@@ -104,16 +106,8 @@ foreach::foreach(i = 1:n_simu,
     cov_emp <- purrr::map(pfbm_mu_orig, ~(.x$x - mu_emp) %*% (t(.x$x - mu_emp))) |>
       (\(x) Reduce('+', x) / (length(x) - 1))()
     
-
-    cov_gkp_center <- covariance_ll(pfbm_mu, holder_const, grid_bandwidth,
-                                    grid_smooth, k0, center = "curves")
-    
-    cov_gkp_prodmu <- covariance_ll(pfbm_mu, holder_const, grid_bandwidth,
-                                    grid_smooth, k0, center = "prod_hmu")
-    
-    cov_gkp_prodgamma <- covariance_ll(pfbm_mu, holder_const, grid_bandwidth,
-                                       grid_smooth, k0, center = "prod_hgamma")
-    
+    cov_gkp <- covariance_ll(pfbm_mu, holder_const, grid_bandwidth,
+                             grid_smooth, k0)
     
     cov_zhang <- covariance_lll(pfbm_mu, grid_smooth)
 
@@ -129,9 +123,7 @@ foreach::foreach(i = 1:n_simu,
       'sample_seq' = sample_seq,
       'pfbm_mu' = pfbm_mu,
       'holder_const' = holder_const,
-      'cov_gkp_center' = cov_gkp_center,
-      'cov_gkp_prodmu' = cov_gkp_prodmu,
-      'cov_gkp_prodgamma' = cov_gkp_prodgamma,
+      'cov_gkp' = cov_gkp,
       'cov_zhang' = cov_zhang,
       'cov_emp' = cov_emp
     )
@@ -171,56 +163,30 @@ plot_subset(result_list[[sample_id]]$pfbm_sampled,
 cov_true <- covariance_mfbm(grid_smooth, hurst) + tau^2 * 1
 
 
-ISE_gkp_center_true <- purrr::map_dbl(result_list, 
-                                ~ISE_2D(grid_smooth, 
-                                        .x$cov_gkp_center$Gamma, cov_true))
+ISE_gkp_true <- purrr::map_dbl(result_list,
+                               ~ISE_2D(grid_smooth,
+                                .x$cov_gkp$Gamma,
+                                 cov_true))
 
-ISE_gkp_center_emp <- purrr::map_dbl(result_list,
-                                     ~ISE_2D(grid_smooth,
-                                             .x$cov_gkp_center$Gamma, 
-                                             .x$cov_emp))
-
-ISE_gkp_prodmu_true <- purrr::map_dbl(result_list,
-                                 ~ISE_2D(grid_smooth,
-                                         .x$cov_gkp_prodmu$Gamma, cov_true))
-
-ISE_gkp_prodmu_emp <- purrr::map_dbl(result_list,
-                                     ~ISE_2D(grid_smooth,
-                                             .x$cov_gkp_prodmu$Gamma, 
-                                             .x$cov_emp))
-
-ISE_gkp_prodgamma_true <- purrr::map_dbl(result_list,
-                                    ~ISE_2D(grid_smooth,
-                                            .x$cov_gkp_prodgamma$Gamma,
-                                            cov_true))
-
-ISE_gkp_prodgamma_emp <- purrr::map_dbl(result_list,
-                                        ~ISE_2D(grid_smooth,
-                                                .x$cov_gkp_prodgamma$Gamma,
-                                                .x$cov_emp))
+ISE_gkp_emp <- purrr::map_dbl(result_list,
+                              ~ISE_2D(grid_smooth,
+                               .x$cov_gkp$Gamma,
+                               .x$cov_emp))
 
 ISE_zhang_true <- purrr::map_dbl(result_list, 
                             ~ISE_2D(grid_smooth, 
-                                    .x$cov_zhang, cov_true))
+                             .x$cov_zhang, cov_true))
 
 ISE_zhang_emp <- purrr::map_dbl(result_list,
                                 ~ISE_2D(grid_smooth,
-                                        .x$cov_zhang, .x$cov_emp))
+                                 .x$cov_zhang, .x$cov_emp))
 
 
-ISE_ratio_center_true <- ISE_gkp_center_true / ISE_zhang_true
-ISE_ratio_prodmu_true <- ISE_gkp_prodmu_true / ISE_zhang_true
-ISE_ratio_prodgamma_true <- ISE_gkp_prodgamma_true / ISE_zhang_true
+ISE_ratio_gkp_true <- ISE_gkp_true / ISE_zhang_true
+ISE_ratio_gkp_emp <- ISE_gkp_emp / ISE_zhang_emp
 
 
-ISE_ratio_center_emp <- ISE_gkp_center_emp / ISE_zhang_emp
-ISE_ratio_prodmu_emp <- ISE_gkp_prodmu_emp / ISE_zhang_emp
-ISE_ratio_prodgamma_emp <- ISE_gkp_prodgamma_emp / ISE_zhang_emp
-
-
-emp <- tibble(ISE_ratio_center = ISE_ratio_center_emp,
-       ISE_ratio_prodmu = ISE_ratio_prodmu_emp,
-       ISE_ratio_prodgamma = ISE_ratio_prodgamma_emp) |>
+emp <- tibble(ISE_ratio_gkp_true = ISE_ratio_gkp_emp) |>
   reshape2::melt() |>
   ggplot(aes(x = variable, y = value, fill = variable)) +
   geom_boxplot() +
@@ -229,9 +195,7 @@ emp <- tibble(ISE_ratio_center = ISE_ratio_center_emp,
   labs(title = "Empirical")
 
 
-true <- tibble(ISE_ratio_center = ISE_ratio_center_true,
-       ISE_ratio_prodmu = ISE_ratio_prodmu_true,
-       ISE_ratio_prodgamma = ISE_ratio_prodgamma_true) |>
+true <- tibble(ISE_ratio_gkp_true = ISE_ratio_gkp_true) |>
   reshape2::melt() |>
   ggplot(aes(x = variable, y = value, fill = variable)) +
   geom_boxplot() +
@@ -247,7 +211,7 @@ emp + true + plot_layout(guides = "collect") +
 
 
 require("GA")
-par(mfrow = c(2, 3))
+par(mfrow = c(2, 2))
 persp3D(grid_smooth, grid_smooth, cov_true, 
         xlab = "t", ylab = "s", zlab = "values",
         main = paste0("True Covariance (N = ", N, ", M = ", M, ")"),
@@ -269,23 +233,9 @@ persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_zhang,
         expand = 0.5)
 
 
-persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_gkp_center$Gamma, 
+persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_gkp$Gamma, 
         xlab = "t", ylab = "s", zlab = "values",
-        main = paste0("Center First", " id = ", sample_id),
-        phi = 30,
-        expand = 0.5)
-
-
-persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_gkp_prodgamma$Gamma, 
-        xlab = "t", ylab = "s", zlab = "values",
-        main = paste0("Center with product (h_mu)", " id = ", sample_id),
-        phi = 30,
-        expand = 0.5)
-
-
-persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_gkp_prodmu$Gamma, 
-        xlab = "t", ylab = "s", zlab = "values",
-        main = paste0("Center with product (h_gamma)", " id = ", sample_id),
+        main = paste0("GKP covariance", " id = ", sample_id),
         phi = 30,
         expand = 0.5)
 
