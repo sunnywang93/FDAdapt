@@ -25,8 +25,9 @@ grid_size_true <- 201
 grid_true <- seq(0, 1, length.out = grid_size_true)
 grid_mu <- seq(0, 1, length.out = 1001)
 grid_smooth <- seq(0, 1, length.out = 101)
-grid_bandwidth <- lseq(0.005, 0.1, length.out = 151)
-k0 <- 2
+grid_bandwidth <- lseq(0.01, 0.15, length.out = 151)
+grid_param = seq(0.1, 0.9, length.out = 20)
+k0 <- 1
 n_simu <- 50
 k_length <- 100
 alpha <- 2
@@ -106,8 +107,9 @@ foreach::foreach(i = 1:n_simu,
     cov_emp <- purrr::map(pfbm_mu_orig, ~(.x$x - mu_emp) %*% (t(.x$x - mu_emp))) |>
       (\(x) Reduce('+', x) / (length(x) - 1))()
     
-    cov_gkp <- covariance_ll(pfbm_mu, holder_const, grid_bandwidth,
-                             grid_smooth, k0)
+    cov_gkp <- covariance_ll(pfbm_mu, grid_bandwidth,
+                             grid_smooth, k0,
+                             grid_param, sigma, mu0)
     
     cov_zhang <- covariance_lll(pfbm_mu, grid_smooth)
 
@@ -241,7 +243,8 @@ persp3D(grid_smooth, grid_smooth, result_list[[sample_id]]$cov_gkp$Gamma,
 
 
 
-
-
-
+#change grid_bandwidth to check robustnesst to WN = 0
+#grid_bandwidth <- lseq(0.005, 0.15, l = 151)
+#generate brownian motion and take eigen and see if scales are good
+#by matching with the true closed form eigenvalues
 

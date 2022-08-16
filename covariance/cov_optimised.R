@@ -1,9 +1,13 @@
 source("/Users/swang/Dropbox/funeigen/mean/mean_optimised.R")
 
-estimate_bandwidth_covariance <- function(curves, params, grid_bandwidth,
-                          grid_smooth, k0)
+estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
+                          grid_smooth, k0, grid_param, sigma = NULL, 
+                          mu0 = NULL)
 {
-  
+
+  params <- estimate_holder_const(curves, sigma = sigma, mu0 = mu0)
+
+  #associate H and L from estimated grid to smoothing grid
   break_points <- params |> dplyr::group_by(H, L, sigma) |>
     dplyr::summarise(t_break = max(t), .groups = "keep") |> 
     dplyr::arrange(t_break)
@@ -27,17 +31,6 @@ estimate_bandwidth_covariance <- function(curves, params, grid_bandwidth,
                         sigma = as.numeric(as.character(intervals_sigma)))
   
   cst_kernel <- 1.5 * (1 / (1 + 2 * grid_tibble$H) - 1 / (3 + 2 * grid_tibble$H)) 
-  var_ <- estimate_variance_curves(data = curves, params = params, 
-                                   grid_smooth = grid_smooth,
-                                   sigma = unique(params$sigma), 
-                                   mu0 = unique(params$mu0))
-
-  q1 <- sqrt(2 * var_$EXt2 * cst_kernel / factorial(floor(grid_tibble$H))^2 *
-                 grid_tibble$L)
-  
-  q2 <- grid_tibble$sigma * sqrt(var_$EXt2)
-  
-  q3 <- sqrt(var_$varXtXs / 2)
   
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
   M_length_cum <- cumsum(M_length)
@@ -70,81 +63,107 @@ estimate_bandwidth_covariance <- function(curves, params, grid_bandwidth,
                   length(curves),
                   length(grid_bandwidth)))
   
-
+  
   #dim G x G x H
   WN <- wst |> aperm(c(3, 4, 1, 2)) |> 
     colSums(na.rm = TRUE) |> 
     aperm(c(2, 3, 1))
   
-  #compute max Wm
-  #only compute over max of m
-  #dim G x N X H
-  max_Wm_num <- sapply(Mi_vec, function(Mi) {
-    T_diff[Mi, ] |> abs() |> matrixStats::colMins() 
-  }, simplify = "array") |> outer(grid_bandwidth, FUN = "/") |>
+  Wm_t <- outer(T_diff, grid_bandwidth, FUN = "/") |>
     epa_kernel()
+  #N x G x H
+  max_Wm_t <- sapply(Mi_vec, function(Mi) {
+    Wm_t[Mi,,] |> apply(c(2,3), FUN = max, na.rm = TRUE)
+  }, simplify = "array")
   
-  K_sum <- T_diff |>
-    outer(grid_bandwidth, FUN = "/") |>
-    epa_kernel()
+  sum_Wm_t <- sapply(Mi_vec, function(Mi) {
+    Wm_t[Mi,,] |> colSums(na.rm = TRUE)
+  }, simplify = "array")
   
-  Wm_denom <- sapply(Mi_vec, function(Mi) {
-    K_sum[Mi, ,] |> colSums(na.rm = TRUE)
-  }, simplify = "array") |> aperm(c(1, 3, 2))
+  max_Wm_t_norm <- (max_Wm_t / sum_Wm_t) 
+  max_Wm_t_norm[is.nan(max_Wm_t_norm)] <- 0
   
+  max_Wm_t_norm <- aperm(max_Wm_t_norm, c(1, 3, 2))
   
-  Wm <- max_Wm_num / Wm_denom
-  Wm[is.nan(Wm)] <- 0
+  gamma_sum_ts <- sapply(seq_along(grid_bandwidth), function(h) {
+    max_Wm_t_norm[,,h] %*% t(ws[,,h])
+  }, simplify = "array")
   
-  #replicate into new 4th dimension s
-  Wm_rep <- replicate(length(grid_smooth), Wm) |>
-    aperm(c(4,1,2,3))
+  #t are columns, s are rows, $N_{\Gamma}(t|s)$
+  Ngamma_ts <- 1 / (1/WN^2 * gamma_sum_ts)
+  Ngamma_ts[!is.finite(Ngamma_ts)] <- 10^(-100)
   
-  Nt <- wst / Wm_rep
-  
-  
-  Nt[is.nan(Nt)] <- 0
-  
-  gamma_sum <- (wst / Nt) |> aperm(c(3,1,2,4)) |> colSums(na.rm = TRUE) 
-  
-  
-  Ngamma <- 1 / ((1/WN^2) * gamma_sum)
-  Ngamma[is.nan(Ngamma)] <- 0
+  Ngamma_st <- aperm(Ngamma_ts, c(2, 1, 3))
+  Ngamma_st[!is.finite(Ngamma_st)] <- 10^(-100)
 
-  #column recycling - q2(s|t)
-  q2_term <- array(q2^2, dim = c(length(grid_smooth), 
-                                 length(grid_smooth), 
-                                 length(grid_bandwidth))) |> 
-    aperm(c(2,1,3)) |>
-    (\(x) x / Ngamma)()
-  #q1(s|t)
-  q1_term <- sapply(grid_bandwidth, function(h) {
-    q1^2 * h^(2*grid_tibble$H)
-  }) |> 
-    (\(x) replicate(length(grid_smooth), x))() |>
-    aperm(c(1, 3, 2))
-    
-  q3_term <- replicate(length(grid_bandwidth), q3^2) * (1/WN - 1/length(curves))
   
-  risk_s <- q1_term + q2_term
+  var_ <- estimate_variance_curves(data = curves, params = params, 
+                                   grid_smooth = grid_smooth,
+                                   sigma = unique(params$sigma), 
+                                   mu0 = unique(params$mu0))
+  
+  
+  q1_ts <- sapply(seq_along(grid_smooth), function(s) {
+    sqrt(2 * var_$EXt2[s] * cst_kernel / factorial(floor(grid_tibble$H))^2 *
+           grid_tibble$L)
+  })
+  
+  q1_st <- t(q1_ts)
+  
+  ones <- rep(1, length(grid_smooth))
+  
+  h_alpha_t <- sapply(grid_bandwidth, function(h) {
+    h^(2*grid_tibble$H)
+  })
+  
+  q1_ts_term <- sapply(seq_along(grid_bandwidth), function(h)
+    outer(h_alpha_t[, h], ones) * q1_ts, simplify = "array") 
+  
+  q1_st_term <- aperm(q1_ts_term, c(2, 1, 3))
+  
+  qq2 <- matrix(var_$EXt2, ncol = length(grid_smooth),
+                nrow = length(grid_smooth))
+  
+  #q2(t|s) = q2(s|t) = q2
+  q2 <- max(sigma^2) * (qq2 + t(qq2))
+  
+  q2_ts_term <- array(q2, dim = c(length(grid_smooth),
+                               length(grid_smooth),
+                               length(grid_bandwidth))) /
+    Ngamma_ts
+  
+  q2_st_term <- array(q2, dim = c(length(grid_smooth),
+                                  length(grid_smooth),
+                                  length(grid_bandwidth))) /
+    Ngamma_st
+  
+  q3 <- sqrt(var_$varXtXs / 2)
+  
+  q3_term <- replicate(length(grid_bandwidth), q3^2) * (1/WN - 1/length(curves))
+
   #risk(t|s) is the transpose of risk(s|t)
-  risk <- risk_s + aperm(risk_s, c(2, 1, 3)) + 2 * q3_term
+  #risk <- risk_s + aperm(risk_s, c(2, 1, 3)) + 2 * q3_term
+  risk <- q1_ts_term + q1_st_term + 
+    q2_ts_term + q2_st_term + 
+    2 * q3_term
   
   min_h_index <- apply(risk, MARGIN = c(1,2), which.min)
   
   apply(min_h_index, 2, function(id) grid_bandwidth[id])
 }
 
-smooth_curves_covariance <- function(curves, params, grid_bandwidth = 
-                                       lseq(0.005, 0.1, length.out = 151),
-                                     grid_smooth = seq(0, 1, length.out = 101),
-                                     k0 = 2) {
+smooth_curves_covariance <- function(curves, grid_bandwidth,
+                                     grid_smooth, k0, grid_param,
+                                     sigma, mu0)
+  {
   
-  
-  bandwidth_matrix <- estimate_bandwidth_covariance(curves, params,
+  bandwidth_matrix <- estimate_bandwidth_covariance(curves,
                                                     grid_bandwidth,
                                                     grid_smooth,
-                                                    k0)
+                                                    k0, 
+                                                    grid_param, 
+                                                    sigma,
+                                                    mu0)
   
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
   
@@ -178,13 +197,16 @@ smooth_curves_covariance <- function(curves, params, grid_bandwidth =
 # 2. prod_hmu (center with prod (mu bandwidth))
 # 3. prod_hgamma (center with prod (gamma bandwidth))
 
-covariance_ll <- function(curves, params, grid_bandwidth = 
+covariance_ll <- function(curves, grid_bandwidth = 
                           lseq(0.005, 0.1, length.out = 151),
                           grid_smooth = seq(0, 1, length.out = 101),
-                          k0 = 2, center = "curves") {
+                          k0 = 2, grid_param = seq(0.1, 0.9, length.out = 20),
+                          sigma = NULL, mu0 = NULL) {
   
-  prod_ <- smooth_curves_covariance(curves, params, grid_bandwidth,
-                                    grid_smooth, k0)
+  prod_ <- smooth_curves_covariance(curves, grid_bandwidth,
+                                    grid_smooth, k0,
+                                    grid_param, sigma, mu0)
+
 
   wt_cond <- purrr::map(curves, ~abs(outer(.x$t, grid_smooth, "-"))) |>
     lapply(function(Ti) {
