@@ -5,7 +5,8 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
                           mu0 = NULL)
 {
 
-  params <- estimate_holder_const(curves, sigma = sigma, mu0 = mu0)
+  params <- estimate_holder_const(curves, sigma = sigma, mu0 = mu0,
+                                  grid_estim = grid_param)
 
   #associate H and L from estimated grid to smoothing grid
   break_points <- params |> dplyr::group_by(H, L, sigma) |>
@@ -149,7 +150,14 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
   
   min_h_index <- apply(risk, MARGIN = c(1,2), which.min)
   
-  apply(min_h_index, 2, function(id) grid_bandwidth[id])
+  list(bw_matrix = apply(min_h_index, 2, function(id) grid_bandwidth[id]),
+       params = list(moments = var_,
+                     constants = grid_tibble,
+                     kernel_int = cst_kernel,
+                     Ngamma_ts = Ngamma_ts,
+                     Ngamma_st = Ngamma_st,
+                     WN = WN))
+  
 }
 
 smooth_curves_covariance <- function(curves, grid_bandwidth,
@@ -157,13 +165,15 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
                                      sigma, mu0)
   {
   
-  bandwidth_matrix <- estimate_bandwidth_covariance(curves,
+  bandwidth_list <- estimate_bandwidth_covariance(curves,
                                                     grid_bandwidth,
                                                     grid_smooth,
                                                     k0, 
                                                     grid_param, 
                                                     sigma,
                                                     mu0)
+  
+  bandwidth_matrix <- bandwidth_list$bw_matrix
   
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
   
@@ -189,7 +199,7 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
   }) |> purrr::map(~(.x * t(.x)))
   
     
-  list(prod = XtXs, bw = bandwidth_matrix)
+  list(prod = XtXs, bw = bandwidth_list)
 }
 
 #center: choose between
@@ -200,7 +210,7 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
 covariance_ll <- function(curves, grid_bandwidth = 
                           lseq(0.005, 0.1, length.out = 151),
                           grid_smooth = seq(0, 1, length.out = 101),
-                          k0 = 2, grid_param = seq(0.1, 0.9, length.out = 20),
+                          k0 = 1, grid_param = seq(0.1, 0.9, length.out = 20),
                           sigma = NULL, mu0 = NULL) {
   
   prod_ <- smooth_curves_covariance(curves, grid_bandwidth,
@@ -211,7 +221,8 @@ covariance_ll <- function(curves, grid_bandwidth =
   wt_cond <- purrr::map(curves, ~abs(outer(.x$t, grid_smooth, "-"))) |>
     lapply(function(Ti) {
       sapply(seq_along(grid_smooth), function(t) {
-        (outer(Ti[, t], prod_$bw[, t], FUN = "<=") * 1) |> colSums(na.rm = TRUE)
+        (outer(Ti[, t], prod_$bw$bw_matrix[, t], FUN = "<=") * 1) |> 
+          colSums(na.rm = TRUE)
       }) |>
         (\(x) (x >= k0)  * 1)() 
     }) 
@@ -226,7 +237,7 @@ covariance_ll <- function(curves, grid_bandwidth =
   gamma <- (1/WN) * prod_sum
   
   Xt_cond <- smooth_curves_mean_plugin(curves, params, grid_smooth,
-                                    k0, prod_$bw)
+                                    k0, prod_$bw$bw_matrix)
   mu_ts <- purrr::map2(Xt_cond, wt_cond, ~.x * .y) |>
     (\(x) Reduce('+', x) / WN)() |>
     (\(x) x * t(x))()
@@ -238,7 +249,7 @@ covariance_ll <- function(curves, grid_bandwidth =
     current_cov <- Gamma[s, t - s + 1]
     while (s <= (t - s + 1)) {
       if (abs(grid_smooth[s] - grid_smooth[t - s + 1]) > 
-          prod_$bw[s, t - s + 1]) {
+          prod_$bw$bw_matrix[s, t - s + 1]) {
         current_cov <- Gamma[s, t - s + 1]
       } else {
         Gamma[s, t - s + 1] <- current_cov
@@ -252,7 +263,7 @@ covariance_ll <- function(curves, grid_bandwidth =
     current_cov <- Gamma[ncol(Gamma) + s - t, t]
     while (t >= (ncol(Gamma) + s - t)) {
       if (abs(grid_smooth[ncol(Gamma) + s - t] - grid_smooth[t]) >
-          prod_$bw[ncol(Gamma) + s - t, t]) {
+          prod_$bw$bw_matrix[ncol(Gamma) + s - t, t]) {
         current_cov <- Gamma[ncol(Gamma) + s - t, t]
       } else {
         Gamma[ncol(Gamma) + s - t, t] <- current_cov
