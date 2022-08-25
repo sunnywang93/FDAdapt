@@ -321,7 +321,7 @@ mean_ll <- function(data, params, grid_bandwidth = lseq(0.005,
 }
 
 
-smooth_curves_mean_plugin <- function(curves, params, grid_smooth,
+smooth_curves_mean_plugin_cov <- function(curves, grid_smooth,
                                       k0, bandwidth) {
   
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
@@ -349,3 +349,30 @@ smooth_curves_mean_plugin <- function(curves, params, grid_smooth,
   
   return(Xt)
 }
+
+mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
+                                grid_smooth, k0, nvalues) {
+
+  indic <- lapply(curves, function(i) {
+    abs(outer(grid_smooth, i$t, FUN = "-")) |>
+      outer(bandwidth, FUN = "<=") * 1
+  })
+  
+  wt <- lapply(indic, function(i) {
+    (apply(i, c(1,3), sum, na.rm = TRUE) >= k0) * 1
+  })
+  
+  WN <- Reduce('+', wt)
+ 
+  sum_curves <- purrr::map2(wt, smoothed_curves, ~(.x * .y)) |>
+    (\(x) Reduce('+', x))()
+  
+  list(mu = (1/WN) * sum_curves,
+       wt = wt)
+}
+
+
+
+
+
+
