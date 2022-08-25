@@ -1,7 +1,4 @@
 #import dependent scripts
-source("/Users/swang/Dropbox/funeigen/generation/generation_klutchnikoff.R")
-source("/Users/swang/Dropbox/funeigen/regularity/H_and_L_functions.R")
-source("/Users/swang/Dropbox/funeigen/mean/mean_optimised.R")
 source("/Users/swang/Dropbox/funeigen/covariance/cov_optimised.R")
 source("/Users/swang/Dropbox/funeigen/utils/utils.R")
 
@@ -121,6 +118,8 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
     }, simplify = "array")
   })
   
+  Wm <- lapply(Wm, function(w) replace(w, is.nan(w), 0))
+  
   Xt <- purrr::map2(Wm, curves, function(w, y) {
     sapply(seq(nvalues), function(j) {
       w[,,j] %*% y$x
@@ -136,26 +135,53 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
   smooth_curves <- smooth_curves_evalues(curves, grid_bandwidth,
                                          grid_smooth, k0,
                                          grid_param, sigma, mu0, nvalues)
-  #compute empirical covariance
-  emp_covariance_curve <- sapply(smooth_curves$smoothed_curves, function(x) {
+  
+  mu_eigen <- mean_plugin_evalues(curves, smooth_curves$smoothed_curves,
+                                  smooth_curves$bw, grid_smooth, k0, nvalues)
+  
+  
+  centered_curves <- lapply(smooth_curves$smoothed_curves, function(i) {
+    i - mu_eigen$mu
+  })
+  
+  weighted_curves <- purrr::map2(centered_curves, mu_eigen$wt,
+                                 ~.x * .y)
+  
+  
+  weighted_cov <- lapply(weighted_curves, function(i) {
     sapply(seq(nvalues), function(j) {
-      x[, j] %*% t(x[, j])
+      i[, j] %*% t(i[, j])
     }, simplify = "array")
-  }, simplify = "array") 
+  }) |> (\(x) Reduce('+', x))()
   
-  emp_covariance <- lapply(seq(nvalues), function(j) {
-    apply(emp_covariance_curve[,,j,], MARGIN = c(1, 2), mean, na.rm = TRUE)
+  WN <- lapply(mu_eigen$wt, function(i) {
+    sapply(seq(nvalues), function(j) {
+      i[, j] %*% t(i[, j])
+    }, simplify = "array")
+  }) |>
+    (\(x) Reduce('+', x))()
+  
+  emp_cov <- (1/WN) * weighted_cov
+  
+  
+  eelements <- lapply(seq(nvalues), function(j) {
+    normalise_eigen(emp_cov[,,j], nvalues)
   })
   
-  eelements <- lapply(emp_covariance, function(covj) {
-    normalise_eigen(covj, nvalues = nvalues)
-  })
-  
-  sapply(seq_along(eelements), function(j) {
+  evalues <- sapply(seq_along(eelements), function(j) {
     eelements[[j]]$values[j]
   })
+  
+  efunctions <- sapply(seq_along(eelements), function(j) {
+    eelements[[j]]$vectors[,j]
+  })
+  
+  list(eelements = list(values = evalues,
+                        functions = efunctions),
+      cov = emp_cov,
+      bw = smooth_curves$bw,
+      smooth_curves = smooth_curves$smoothed_curves)
 }
-
 
 
 
