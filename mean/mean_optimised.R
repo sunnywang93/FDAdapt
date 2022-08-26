@@ -111,7 +111,13 @@ estimate_variance_curves <- function(data, params, grid_smooth,
   })
   
   var_XtXs <- Reduce(modifiedSum, diff_var_prod)/length(diff_var_prod)
-  list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2)
+  
+  EXtXs2 <- lapply(X_hat_prod, function(i) {
+    i^2
+  }) |> (\(x) Reduce(modifiedSum, x)/length(x))()
+    
+  list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2,
+       EXtXs2 = EXtXs2)
 }
 
 

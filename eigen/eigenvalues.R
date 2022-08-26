@@ -68,7 +68,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
     apply(c(2,3), function(x) pracma::trapz(grid_smooth, x)) |>
     t()
   
-  q3 <- array(cov_gkp$bw$params$moments$varXtXs, 
+  q3 <- array(cov_gkp$bw$params$moments$EXtXs2, 
                    dim = c(length(grid_smooth),
                            length(grid_smooth),
                            length(grid_bandwidth))) *
