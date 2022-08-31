@@ -109,15 +109,16 @@ add_mean_curve <- function(data, mu_t) {
 }
 
 
-add_mean_to_original <- function(data, mu_t, grid_smooth) {
-  #first add mean on the original grid where the curves are generated
+add_mean_to_true <- function(data, mu_t) {
   idx <- purrr::map_dbl(data[[1]]$ideal$t, ~which.min(abs(.x - mu_t$t)))
-  mu_Ti <- mu_t$mu[idx]
-  XiTi <- purrr::map(data, ~.x$ideal$x + mu_Ti)
-  Xi_list <- purrr::map(XiTi, ~list(t = data[[1]]$ideal$t, x = .x))
-  #now associate it to smoothed grid
-  idx2 <- purrr::map_dbl(grid_smooth, ~which.min(abs(.x - Xi_list[[1]]$t)))
-  purrr::map(Xi_list, ~list(t = .x$t[idx2], x = .x$x[idx2]))
+  mu_grid_true <- mu_t$mu[idx]
+  curves_with_mu <- purrr::map(data, ~.x$ideal$x + mu_grid_true)
+  init <- vector(mode = "list", length = length(data))
+  for (i in 1:length(init)) {
+    init[[i]]$t <- data[[1]]$ideal$t
+    init[[i]]$x <- curves_with_mu[[i]]
+  }
+  init
 }
 
 
@@ -164,5 +165,35 @@ true_cov_pfbm <- function(t, s, H, change_point) {
   obs <- expand.grid(t = t, s = s)
   0.5 * (abs(obs$t)^(2*H) + abs(obs$s)^(2*H) - abs(obs$t - obs$s)^(2*H))
 }
+
+normalise_eigen <- function(covariance, nvalues = 10) {
+  eelements <- eigen(covariance, symmetric = TRUE)
+  evalues <- eelements$values[seq(nvalues)]
+  efunctions <- eelements$vectors[, seq(nvalues)]
+  evalues_norm <- evalues / nrow(covariance)
+  efunctions_norm <- sapply(seq(nvalues), function(j) efunctions[, j] * 
+                              sqrt(nrow(covariance)))
+  list(values = evalues_norm,
+       vectors = efunctions_norm)
+}
+
+eigen_error <- function(eigen_estim, eigen_true) {
+  evalues_error <- (eigen_estim$values - eigen_true$values) / eigen_true$values
+  sgn <- sapply(seq(ncol(eigen_estim$vectors)), function(j) {
+    c(sign(t(eigen_estim$vectors[, j]) %*% eigen_true$vectors[, j])) 
+  })
+  evectors_error <- sapply(seq(ncol(eigen_estim$vectors)), function(j) {
+    norm((sgn[j] * eigen_true$vectors[, j] - eigen_estim$vectors[, j]) / 
+           sqrt(nrow(eigen_estim$vectors)), type = "2") 
+  })
+  list(evalues_error = evalues_error, 
+       efunctions_error = evectors_error)
+}
+
+
+
+
+
+
 
 
