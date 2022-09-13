@@ -5,7 +5,6 @@ MSE_1D <- function(mu, mu_estim) {
 ISE <- function(t, x, y, trimmed = FALSE){
   if (trimmed) {
     cond <- (t > 0.05) & (t < 0.95)
-    t <- t[cond]
     x <- x[cond]
     y <- y[cond]
   }
@@ -33,10 +32,10 @@ ISE_2D <- function(t, x, y, trimmed = FALSE) {
 }
 
 list2cai <- function(data){
-  seq_along(data) |> 
+  seq_along(data) |>
     lapply(function(idx) {
       data.frame(obs = idx, time = data[[idx]]$t, x = data[[idx]]$x)
-    }) |> 
+    }) |>
     (\(x) do.call("rbind", x))()
 }
 
@@ -71,37 +70,37 @@ generate_mean_curve <- function(k_length, grid_t = seq(0, 1, length.out = 101),
     xi <- c(xi, xi_k)
   }
   k <- seq(1, k_length, by = 1)
-  
+
   # mu_kt <- sapply(grid_t, function(t) {
   #   Z * sqrt(xi) * cos(k * pi * t)
   # })
-  
+
   mu_kt <- sapply(grid_t, function(t) {
     sqrt(2) * Z * sqrt(xi) * sin((k - 0.5) * pi * t)
   })
-  
+
 
   mu_t <- scale_mu * colSums(mu_kt) + rep(shift, length(grid))
   tibble(t = grid_t, mu = mu_t)
-} 
+}
 
 
 #add mean curve to each curve
 #input: mu_t on a dense grid
 add_mean_curve <- function(data, mu_t) {
-  
+
   m <- data |> map_dbl(~length(.x$t))
-  
+
   idx <- lapply(data, function(i) {
     map_dbl(i$t, ~which.min(abs(.x - mu_t$t)))
   })
-  
+
   mu_Ti <- lapply(idx, function(id) {
     mu_t$mu[id]
   })
-  
+
   curves_with_mean <- map2(data, mu_Ti, ~(.x$x + .y))
-  
+
   for(i in 1:length(data)) {
     data[[i]]$x <- curves_with_mean[[i]]
   }
@@ -126,23 +125,23 @@ get_means <- function(result_list, n_simu = n_simu) {
   mu_gkp <- sapply(result_list, function(x) x$mu_gkp$mu_hat)
   mu_cai <- sapply(result_list, function(x) x$mu_cai)
   mu_zhang <- sapply(result_list, function(x) x$mu_zhang)
-  
+
   MSE_gkp <- sapply(seq(n_simu), function(id) {
     MSE_1D(mu_Ti, mu_gkp[, id])
   })
-  
+
   MSE_cai <- sapply(seq(n_simu), function(id) {
     MSE_1D(mu_Ti, mu_cai[, id])
   })
-  
+
   MSE_zhang <- sapply(seq(n_simu), function(id) {
     MSE_1D(mu_Ti, mu_zhang[, id])
   })
-  
+
   #ratios of integrated squared error
   ratio_cai <- MSE_gkp / MSE_cai
   ratio_zhang <- MSE_gkp / MSE_zhang
-  
+
   cbind(ratio_cai, ratio_zhang)
 }
 
@@ -171,7 +170,7 @@ normalise_eigen <- function(covariance, nvalues = 10) {
   evalues <- eelements$values[seq(nvalues)]
   efunctions <- eelements$vectors[, seq(nvalues)]
   evalues_norm <- evalues / nrow(covariance)
-  efunctions_norm <- sapply(seq(nvalues), function(j) efunctions[, j] * 
+  efunctions_norm <- sapply(seq(nvalues), function(j) efunctions[, j] *
                               sqrt(nrow(covariance)))
   list(values = evalues_norm,
        vectors = efunctions_norm)
@@ -180,18 +179,52 @@ normalise_eigen <- function(covariance, nvalues = 10) {
 eigen_error <- function(eigen_estim, eigen_true) {
   evalues_error <- (eigen_estim$values - eigen_true$values) / eigen_true$values
   sgn <- sapply(seq(ncol(eigen_estim$vectors)), function(j) {
-    c(sign(t(eigen_estim$vectors[, j]) %*% eigen_true$vectors[, j])) 
+    c(sign(t(eigen_estim$vectors[, j]) %*% eigen_true$vectors[, j]))
   })
   evectors_error <- sapply(seq(ncol(eigen_estim$vectors)), function(j) {
-    norm((sgn[j] * eigen_true$vectors[, j] - eigen_estim$vectors[, j]) / 
-           sqrt(nrow(eigen_estim$vectors)), type = "2") 
+    norm((sgn[j] * eigen_true$vectors[, j] - eigen_estim$vectors[, j]) /
+           sqrt(nrow(eigen_estim$vectors)), type = "2")
   })
-  list(evalues_error = evalues_error, 
+  list(evalues_error = evalues_error,
        efunctions_error = evectors_error)
 }
 
+eigen_interpolate <- function(curves, grid_smooth, nvalues) {
+  smoothed_curves <- sapply(curves, function(i) {
+    pracma::interp1(x = c(0, i$t, 1),
+                    y = c(i$x[1], i$x, i$x[length(i$x)]),
+                    xi = grid_smooth, method = "linear")
+  })
+  mean <- rowMeans(smoothed_curves, na.rm = TRUE)
+  centered_curves <- smoothed_curves - mean
+  cov <- sapply(seq_along(curves), function(i) {
+    centered_curves[, i] %*% t(centered_curves[, i])
+  }, simplify = "array") |>
+    apply(MARGIN = c(1, 2), mean, na.rm = TRUE)
+  eelements <- eigen(cov, symmetric = TRUE)
+  evalues <- eelements$values[1:nvalues] / length(grid_smooth)
+  efunctions <- eelements$vectors[, 1:nvalues] * sqrt(grid_smooth)
+  list(evalues = evalues, efunctions = efunctions)
+}
 
-
+#need to be careful with the diagonal terms
+eigen_kneip <- function(curves, grid_smooth, nvalues) {
+  smoothed_curves <- sapply(curves, function(i) {
+    pracma::interp1(x = c(-i$t[1], i$t, 2 - i$t[length(i$t)]),
+                    y = c(i$x[1], i$x, i$x[length(i$x)]),
+                    xi = grid_smooth, method = "nearest")
+  })
+  mean <- rowMeans(smoothed_curves)
+  centered_curves <- smoothed_curves - mean
+  cov <- sapply(seq_along(curves), function(i) {
+    centered_curves[, i] %*% t(centered_curves[, i])
+  }, simplify = "array") |>
+    apply(MARGIN = c(1, 2), mean, na.rm = TRUE)
+  eelements <- eigen(cov, symmetric = TRUE)
+  evalues <- eelements$values[1:nvalues] / length(grid_smooth)
+  efunctions <- eelements$vectors[, 1:nvalues] * sqrt(grid_smooth)
+  list(evalues = evalues, efunctions = efunctions)
+}
 
 
 
