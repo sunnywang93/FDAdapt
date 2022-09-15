@@ -62,28 +62,18 @@ estimate_density <- function(data) {
 #' @export
 
 presmoothing <- function (data,
-                          t0_list = seq(.2, .8, l = 20),
+                          t0_list = seq(.1, .9, l = 20),
                           init_b = 1,
                           init_L = 1,
                           sigma = NULL,
                           mu0 = NULL)
 {
-
-  NW <- function(t, T_mi, Y_mi, h, alpha = 1) {
-    K <- function(x, beta){
-      ((1 + beta) / (2 * beta))  * (1 - abs(x)^beta) * (abs(x) <= 1)
-    }
-    tt <- matrix(rep(t, length(T_mi)), ncol = length(T_mi))
-    TT <- t(matrix(rep(T_mi, length(t)), ncol = length(t)))
-    Kx <- 2 * K(x = (tt - TT) / h, beta = alpha)
-    (Kx %*% Y_mi) / matrix(rowSums(Kx))
-  }
-
   m <- data |> purrr::map_dbl(~ length(.x$t)) |> mean()
 
   delta <- min(log(m)^(-1.1), 0.2)
   t1_list <- t0_list - delta / 2
   t3_list <- t0_list + delta / 2
+
   if(is.null(sigma)) {
     sigma <- estimate_sigma(data)
   }
@@ -91,26 +81,33 @@ presmoothing <- function (data,
     mu0 <- estimate_density(data)
   }
 
-  #b_naive <- (delta / round(m))**(1 / (2 * order + 1))
-  #b_naive <- log(m) / m
   aa <- (init_b + 1) / 2 * init_b**2 * mu0
   c <- (sigma**(2*init_b) * init_L * aa**init_b)**(1 / (2*init_b + 1))
   psi_m <- (1 / m)**(init_b / (2 * init_b + 1))
-  b_naive <- pmax(pmin((c * psi_m / init_L)**(1 / init_b), delta/4), log(m)/m)
-
-  inner_loop <- function(i, data, t_list, b_naive, init_b) {
-    sapply(data, function(x) {
-      NW(t = t_list[, i],
-         T_mi = x$t, Y_mi = x$x,
-         h = b_naive, alpha = init_b)
-    }) |> t()
-  }
+  b_naive <- (c * psi_m / init_L)**(1 / init_b)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
-  purrr::map(1:ncol(t_list), ~list(
-    t_list = t_list[,.x],
-    x = inner_loop(.x, data = data, t_list = t_list,
-                   b_naive = b_naive, init_b = 1)))
+
+  theta_num <- lapply(seq(ncol(t_list)), function(t_col) {
+    sapply(data, function(i) {
+      (outer(i$t, t_list[, t_col], FUN = "-") / b_naive) |>
+        bertin_kernel(b_naive) |>
+        (\(x) (t(x) %*% i$x) / (length(i$t) * b_naive))()
+      }) |> t()
+    })
+
+  theta_denom <- lapply(seq(ncol(t_list)), function(t_col) {
+    sapply(data, function(i) {
+      (outer(i$t, t_list[, t_col], FUN = "-") / b_naive) |>
+        bertin_kernel(b_naive) |> colSums() |>
+        (\(x) x / (length(i$t) * b_naive))()
+      }) |> t() |> pmax(1/100)
+    })
+
+  theta <- purrr::map2(theta_num, theta_denom, ~.x / .y)
+
+  purrr::map(1:ncol(t_list), ~list(t_list = t_list[, .x],
+                                   x = theta[[.x]]))
 }
 
 #' Performs estimation of Hölder exponent
@@ -118,31 +115,20 @@ presmoothing <- function (data,
 #' `estimate_H0` estimates the Hölder constant of presmoothed curves,
 #' typically as output from the function `presmoothing`.
 #'
-#' @param data A list, containing
+#' @param presmoothed_data A list, containing
 #' - **$x** Smoothed data points.
-#' @param center TRUE/FALSE, where TRUE induces an additional
-#'  centering in each term.
 #' @returns A vector containing the estimated values at the
 #' sampling points of presmoothed curves.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
-estimate_H0 <- function(data, center = FALSE){
-  data |> purrr::map_dbl(function(d) {
-    if(center) {
-      a <- mean((d$x[, 3] - d$x[, 1] - mean(d$x[, 3] - d$x[, 1]))**2,
-                na.rm = TRUE)
-      b <- mean((d$x[, 2] - d$x[, 1] - mean(d$x[, 2] - d$x[, 1]))**2,
-                na.rm = TRUE)
-      c <- mean((d$x[, 3] - d$x[, 2] - mean(d$x[, 3] - d$x[, 2]))**2,
-                na.rm = TRUE)
-    }
-    else {
-      a <- mean((d$x[, 3] - d$x[, 1])**2, na.rm = TRUE)
-      b <- mean((d$x[, 2] - d$x[, 1])**2, na.rm = TRUE)
-      c <- mean((d$x[, 3] - d$x[, 2])**2, na.rm = TRUE)
-    }
+estimate_H0 <- function(presmoothed_data){
+  presmoothed_data |> purrr::map_dbl(function(d) {
+    a <- mean((d$x[, 3] - d$x[, 1])**2, na.rm = TRUE)
+    b <- mean((d$x[, 2] - d$x[, 1])**2, na.rm = TRUE)
+    c <- mean((d$x[, 3] - d$x[, 2])**2, na.rm = TRUE)
+
     max(min((2 * log(a) - log(b * c)) / log(16), 1), 0.1)
   }
   )
@@ -154,45 +140,30 @@ estimate_H0 <- function(data, center = FALSE){
 #' `estimate_L0` estimates the Hölder constant of presmoothed curves,
 #' typically as output from the function `presmoothing`.
 #'
-#' @param data A list, containing
+#' @param presmoothed_data A list, containing
 #' - **$x** Smoothed data points.
 #' @param H0_list Vector containing Hölder exponents, typically as
 #' output from `estimate_H0`.
-#' @param M Mean number of points on each curve. Defaults to NULL,
-#' which calculates it.
-#' @param center TRUE/FALSE, where TRUE induces an additional
-#'  centering in each term.
+#' @param M Mean number of points on each curve.
 #' @returns A vector containing the estimated values at the
 #' sampling points of presmoothed curves.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
-estimate_L0 <- function(data, H0_list, M = NULL, center = FALSE) {
-  if(is.null(M)) {
-    M <- data |> purrr::map_dbl(~length(.x$x)) |> mean()
-  }
-  H0 <- H0_list |> purrr::map_dbl(~ .x - 1 / log(M)**1.01)
-  if(center) {
-    V1 <- data |>
-      purrr::map2(H0,
-                  ~ (.x$x[, 2] - .x$x[, 1] - mean(.x$x[, 2] - .x$x[, 1]))**2 /
-                    abs(.x$t[2] - .x$t[1] - mean(.x$t[2] - .x$t[1]))**(2 * .y))
-    V2 <- data |>
-      purrr::map2(H0,
-                  ~ (.x$x[, 3] - .x$x[, 2] - mean(.x$x[, 3] - .x$x[, 2]))**2 /
-                    abs(.x$t[3] - .x$t[2] - mean(.x$t[3] - .x$t[2]))**(2 * .y))
-  }
-  else {
-    V1 <- data |>
-      purrr::map2(H0,
-                  ~ (.x$x[, 2] - .x$x[, 1])**2 / abs(.x$t[2] - .x$t[1])**(2 * .y))
-    V2 <- data |>
-      purrr::map2(H0,
-                  ~ (.x$x[, 3] - .x$x[, 2])**2 / abs(.x$t[3] - .x$t[2])**(2 * .y))
-  }
-  V_mean <- V1 |> purrr::map2_dfc(V2, ~ (.x + .y) / 2)
-  unname(sqrt(colMeans(V_mean, na.rm = TRUE)))
+estimate_L0 <- function(presmoothed_data, H0_list, M) {
+
+  V1 <- purrr::map2(presmoothed_data, H0_list,
+                      ~ (.x$x[, 2] - .x$x[, 1])**2 /
+                        abs(.x$t[2] - .x$t[1])**(2 * .y))
+
+  V2 <- purrr::map2(presmoothed_data, H0_list,
+                  ~ (.x$x[, 3] - .x$x[, 2])**2 /
+                    abs(.x$t[3] - .x$t[2])**(2 * .y))
+
+  V_mean <- mapply(function(x, y) (x + y) / 2, V1, V2)
+
+  sqrt(colMeans(V_mean, na.rm = TRUE))
 }
 
 #' Performs twice recursive estimation of parameters
@@ -224,19 +195,13 @@ estimate_holder_const <- function(data,
   if(is.null(mu0)) {
     mu0 <- estimate_density(data)
   }
-  presmoothed <- data |>
-    presmoothing(t0_list = grid_estim, sigma = sigma, mu0 = mu0)
+  presmoothed <- presmoothing(data, t0_list = grid_estim, sigma = sigma,
+                              mu0 = mu0)
 
   H0 <- estimate_H0(presmoothed)
   L0 <- estimate_L0(presmoothed, H0)
 
-  presmoothed_2nd <- data |>
-    presmoothing(t0_list = grid_estim, init_b = H0, init_L = L0,
-                 sigma = sigma, mu0 = mu0)
-
-  H1 <- estimate_H0(presmoothed_2nd)
-  L1 <- estimate_L0(presmoothed_2nd, H1)
-  tibble::tibble(t = grid_estim, H = H1, L = L1, sigma = sigma, mu0 = mu0)
+  tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
 }
 
 
