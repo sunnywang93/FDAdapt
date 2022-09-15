@@ -1,4 +1,8 @@
-#' Estimate noise level of curves
+#' Estimate noise level of curves using only observed points
+#'
+#' #' `estimate_sigma` estimates the variance of curves, using only
+#' information from curves. Used as a preliminary estimate of sigma,
+#' usually as a first pass to the function `estimate_sigma_recursive`.
 #'
 #' @param data List, where each element represents a curve. Each curve
 #' must be a list with two entries:
@@ -9,7 +13,7 @@
 
 estimate_sigma <- function(data) {
   Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-  delta <- (1/log(Mbar)^2)
+  delta <- log(log(Mbar)) / Mbar
   indic <- data |>
     purrr::map(~as.numeric(abs(diff(sort(.x$t, decreasing = TRUE))) <= delta))
   diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))^2)
@@ -17,6 +21,36 @@ estimate_sigma <- function(data) {
   denom <- indic |> purrr::map_dbl(~sum(.x))
   sum_diffsq_norm <- sum_diffsq / (2 * denom)
   sqrt(mean(sum_diffsq_norm))
+}
+
+#' Estimate noise level of curves with presmoothing
+#'
+#' `estimate_sigma_recursive` estimates the variance of curves, using
+#' a presmoothing approach. Presmoothing is done using Bertin's approach,
+#' detailed in the references. Has a minimum bandwidth corresponding to
+#' 5% of the interval if the calculated bandwidth is too big.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @returns A number.
+#' #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
+#' nonparametric regression with random design.
+#' @export
+
+estimate_sigma_recursive <- function(data) {
+  Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
+  interval <- purrr::map_dbl(data, ~(max(.x$t) - min(.x$t))) |> max()
+  bandwidth_min <- interval * 0.05
+  sigma <- estimate_sigma(data)
+  mu0 <- estimate_density(data)
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b = 1, init_L = 1, m = Mbar) |>
+    pmin(bandwidth_min)
+  presmooth_curves <- bertin_smoother_recursive(data, bandwidth)
+  resid <- purrr::map2(data, presmooth_curves, ~(.x$x - .y$x)**2)
+  purrr::map(resid, ~mean(.x))
+  unlist(resid) |> mean(na.rm = TRUE) |> sqrt()
 }
 
 #' Estimate minimum density of sample points
@@ -40,7 +74,7 @@ estimate_density <- function(data) {
 #'
 #' `presmoothing` performs presmoothing on irregularly sampled curves,
 #' for the purpose of estimating parameters such as Hölder constants.
-#' Performed using the Nadaraya-Watson estimator, with bandwidth
+#' Performed using a modified Nadaraya-Watson estimator, with bandwidth
 #' detailed in the references.
 #'
 #' @param data List, where each element represents a curve. Each curve
@@ -81,30 +115,17 @@ presmoothing <- function (data,
     mu0 <- estimate_density(data)
   }
 
-  aa <- (init_b + 1) / 2 * init_b**2 * mu0
-  c <- (sigma**(2*init_b) * init_L * aa**init_b)**(1 / (2*init_b + 1))
-  psi_m <- (1 / m)**(init_b / (2 * init_b + 1))
-  b_naive <- (c * psi_m / init_L)**(1 / init_b)
+  interval_length <- max(t0_list) - min(t0_list)
+  bandwidth_min <- interval_length * 0.05
+
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) |>
+    pmin(bandwidth_min)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
 
-  theta_num <- lapply(seq(ncol(t_list)), function(t_col) {
-    sapply(data, function(i) {
-      (outer(i$t, t_list[, t_col], FUN = "-") / b_naive) |>
-        bertin_kernel(b_naive) |>
-        (\(x) (t(x) %*% i$x) / (length(i$t) * b_naive))()
-      }) |> t()
-    })
-
-  theta_denom <- lapply(seq(ncol(t_list)), function(t_col) {
-    sapply(data, function(i) {
-      (outer(i$t, t_list[, t_col], FUN = "-") / b_naive) |>
-        bertin_kernel(b_naive) |> colSums() |>
-        (\(x) x / (length(i$t) * b_naive))()
-      }) |> t() |> pmax(1/100)
-    })
-
-  theta <- purrr::map2(theta_num, theta_denom, ~.x / .y)
+  theta <- lapply(seq(ncol(t_list)), function(t_col) {
+    bertin_smoother(data, t_list[, t_col], bandwidth)
+  })
 
   purrr::map(1:ncol(t_list), ~list(t_list = t_list[, .x],
                                    x = theta[[.x]]))
@@ -203,5 +224,112 @@ estimate_holder_const <- function(data,
 
   tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
 }
+
+#' Calculates bandwidth for smoothing
+#'
+#' `bertin_bandwidth` calculates the bandwidth used for downstream smoothing.
+#' Approach is detailed in the references.
+#'
+#' @param sigma Noise level of the curves. If unknown, can be estimated from
+#' using `estimate_sigma` or `estimate_sigma_recursive`.
+#' @param mu0 Minimum density of time points. If unknown, can be estimated
+#' using `estimate_density`.
+#' @param init_b Initialised Hölder exponent.
+#' @param init_L Initialised Hölder constant.
+#' @param m Average number of sampling points per curve.
+#' @returns A scalar of vector, depending on the inputs.
+#' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
+#' nonparametric regression with random design.
+#' @export
+
+bertin_bandwidth <- function(sigma, mu0, init_b, init_L, m) {
+  aa <- (init_b + 1) / 2 * init_b**2 * mu0
+  c <- (sigma**(2*init_b) * init_L * aa**init_b)**(1 / (2*init_b + 1))
+  psi_m <- (1 / m)**(init_b / (2 * init_b + 1))
+  (c * psi_m / init_L)**(1 / init_b)
+}
+
+#' Smooths curves using modified Nadaraya-Watson smoother
+#'
+#' `bertin_smoother` performs curve smoothing using a kernel, referred to as
+#' the Bertin kernel (see `bertin_kernel`). Usually used as an auxiliary
+#' function for others such as `presmoothing`.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param grid Vector of sampling points which smoothing
+#'  is performed.
+#' @param bandwidth Bandwidth used to smooth curves, usually
+#'  calculated from `bertin_bandwidth`.
+#' @returns A matrix, with the rows representing curves
+#' and columns the time points where smoothing is performed.
+#' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
+#' nonparametric regression with random design.
+#' @export
+
+bertin_smoother <- function(data, grid, bandwidth) {
+
+  theta_num <- sapply(data, function(i) {
+      (outer(i$t, grid, FUN = "-") / bandwidth) |>
+        bertin_kernel(bandwidth) |>
+        (\(x) (t(x) %*% i$x) / (length(i$t) * bandwidth))()
+    }) |> t()
+
+  theta_denom <- sapply(data, function(i) {
+      (outer(i$t, grid, FUN = "-") / bandwidth) |>
+        bertin_kernel(bandwidth) |> colSums() |>
+        (\(x) x / (length(i$t) * bandwidth))()
+    }) |> t() |> pmax(1/100)
+
+  theta_num / theta_denom
+}
+
+
+#' Smooths curves on its own grid
+#'
+#' `bertin_smoother_recursive` performs curve smoothing using a kernel,
+#' referred to as the Bertin kernel (see `bertin_kernel`). Used only
+#' as an auxiliary function to `estimate_sigma_recursive`. Smoothing
+#' is done on the grid of each curve's observed points.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param bandwidth Bandwidth used to smooth curves, usually
+#'  calculated from `bertin_bandwidth`.
+#' @returns A list, containing
+#' - **$t** Sample points of curves.
+#' - **$x** Smoothed data points.
+#' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
+#' nonparametric regression with random design.
+#' @export
+
+bertin_smoother_recursive <- function(data, bandwidth) {
+
+  theta_num <- lapply(data, function(i) {
+    (outer(i$t, i$t, FUN = "-") / bandwidth) |>
+      bertin_kernel(bandwidth) |>
+      (\(x) (x %*% i$x) / (length(i$t) * bandwidth))() |>
+      c()
+  })
+
+  theta_denom <- lapply(data, function(i) {
+    (outer(i$t, i$t, FUN = "-") / bandwidth) |>
+      bertin_kernel(bandwidth) |> colSums() |>
+      (\(x) x / (length(i$t) * bandwidth))() |>
+      pmax(1/100)
+  })
+
+  theta <- purrr::map2(theta_num, theta_denom, ~(.x / .y))
+
+  purrr::map2(data, theta, ~list(t = .x$t,
+                                 x = .y))
+
+}
+
+
 
 
