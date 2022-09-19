@@ -42,7 +42,7 @@ estimate_sigma <- function(data) {
 estimate_sigma_recursive <- function(data) {
   Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
   interval <- purrr::map_dbl(data, ~(max(.x$t) - min(.x$t))) |> max()
-  bandwidth_min <- interval * 0.05
+  bandwidth_min <- interval * 0.075
   sigma <- estimate_sigma(data)
   mu0 <- estimate_density(data)
   bandwidth <- bertin_bandwidth(sigma, mu0, init_b = 1, init_L = 1, m = Mbar) |>
@@ -67,7 +67,7 @@ estimate_sigma_recursive <- function(data) {
 
 estimate_density <- function(data) {
   T_all <- data |> purrr::map(~.x$t) |> unlist() |> sort()
-  min(density(T_all, from = 0.1, to = 0.9)$y)
+  min(density(T_all, from = 0.15, to = 0.85)$y)
 }
 
 #' Performs presmoothing of curves
@@ -75,7 +75,8 @@ estimate_density <- function(data) {
 #' `presmoothing` performs presmoothing on irregularly sampled curves,
 #' for the purpose of estimating parameters such as Hölder constants.
 #' Performed using a modified Nadaraya-Watson estimator, with bandwidth
-#' detailed in the references.
+#' detailed in the references. A lower and upper bound on the bandwidths
+#' are imposed in order to avoid degenerate cases.
 #'
 #' @param data List, where each element represents a curve. Each curve
 #' must be a list with two entries:
@@ -109,17 +110,17 @@ presmoothing <- function (data,
   t3_list <- t0_list + delta / 2
 
   if(is.null(sigma)) {
-    sigma <- estimate_sigma(data)
+    sigma <- estimate_sigma_recursive(data)
   }
   if(is.null(mu0)) {
     mu0 <- estimate_density(data)
   }
 
-  interval_length <- max(t0_list) - min(t0_list)
+  interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
   bandwidth_min <- interval_length * 0.05
 
   bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) |>
-    pmin(bandwidth_min)
+    pmin(bandwidth_min) |> pmax(log(m) / m)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
 
@@ -174,17 +175,17 @@ estimate_H0 <- function(presmoothed_data){
 
 estimate_L0 <- function(presmoothed_data, H0_list, M) {
 
-  V1 <- purrr::map2(presmoothed_data, H0_list,
-                      ~ (.x$x[, 2] - .x$x[, 1])**2 /
+  H0 <- H0_list %>% purrr::map_dbl(~.x - 1/log(M)**1.01)
+
+  V1 <- purrr::map2_dbl(presmoothed_data, H0,
+                      ~ mean((.x$x[, 2] - .x$x[, 1])**2, na.rm = TRUE) /
                         abs(.x$t[2] - .x$t[1])**(2 * .y))
 
-  V2 <- purrr::map2(presmoothed_data, H0_list,
-                  ~ (.x$x[, 3] - .x$x[, 2])**2 /
+  V2 <- purrr::map2_dbl(presmoothed_data, H0,
+                  ~ mean((.x$x[, 3] - .x$x[, 2])**2, na.rm = TRUE) /
                     abs(.x$t[3] - .x$t[2])**(2 * .y))
 
-  V_mean <- mapply(function(x, y) (x + y) / 2, V1, V2)
-
-  sqrt(colMeans(V_mean, na.rm = TRUE))
+  sqrt((V1 + V2) / 2)
 }
 
 #' Performs twice recursive estimation of parameters
@@ -210,17 +211,22 @@ estimate_holder_const <- function(data,
                                   grid_estim = seq(0.2, 0.8, length.out = 20),
                                   sigma = NULL,
                                   mu0 = NULL) {
+
   if(is.null(sigma)) {
-    sigma <- estimate_sigma(data)
+    sigma <- estimate_sigma_recursive(data)
   }
   if(is.null(mu0)) {
     mu0 <- estimate_density(data)
   }
+
   presmoothed <- presmoothing(data, t0_list = grid_estim, sigma = sigma,
                               mu0 = mu0)
 
   H0 <- estimate_H0(presmoothed)
-  L0 <- estimate_L0(presmoothed, H0)
+
+  M <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
+
+  L0 <- estimate_L0(presmoothed, H0, M)
 
   tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
 }
