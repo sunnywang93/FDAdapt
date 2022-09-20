@@ -364,12 +364,13 @@ mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
                                 grid_smooth, k0) {
 
   indic <- lapply(curves, function(i) {
-    abs(outer(grid_smooth, i$t, FUN = "-")) |>
+    outer(i$t, grid_smooth, FUN = "-") |> abs() |>
       outer(bandwidth, FUN = "<=") * 1
   })
 
   wt <- lapply(indic, function(i) {
-    (apply(i, c(1,3), sum, na.rm = TRUE) >= k0) * 1
+    colSums(i, na.rm = TRUE) |>
+      (\(x) (x >= k0) * 1)()
   })
 
   WN <- Reduce('+', wt)
@@ -377,7 +378,7 @@ mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
   sum_curves <- purrr::map2(wt, smoothed_curves, ~(.x * .y)) |>
     (\(x) Reduce('+', x))()
 
-  list(mu = (1/WN) * sum_curves,
+  list(mu = sum_curves / WN,
        wt = wt)
 }
 
