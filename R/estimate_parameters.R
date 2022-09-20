@@ -116,8 +116,8 @@ presmoothing <- function (data,
     mu0 <- estimate_density(data)
   }
 
-  interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
-  bandwidth_min <- interval_length * 0.05
+  # interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
+  # bandwidth_min <- interval_length * 0.05
 
   bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) #|>
     #pmin(bandwidth_min) |> pmax(log(m) / m)
@@ -278,60 +278,36 @@ estimate_variance_curves <- function(data, params, grid_smooth,
                                 H = H_grid_smooth,
                                 L = L_grid_smooth,
                                 sigma = max(sigma))
+
+
   #now smooth each curve using Bertin's bandwidth
-  c <- (sigma^(2*grid_tibble$H) * grid_tibble$L *
-          ((grid_tibble$H + 1)/ 2 * grid_tibble$H^2 * mu0)^grid_tibble$H)^
-    (1 / (2*grid_tibble$H + 1))
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m)
+  X_hat <- bertin_smoother(data, grid_smooth, bandwidth) |> t()
 
-  psi_m <- (1 / m)^(grid_tibble$H / (2 * grid_tibble$H + 1))
-  delta <- min(log(m)^(-1.1), 0.2)
-  b_naive <- pmax(pmin((c * psi_m / grid_tibble$L)^(1 / grid_tibble$H),
-                       delta/4), log(m)/m)
-
-
-
-  #define nadaraya-watson weights
-  #here we use Bertin's bandwidth and kernel
-  Wmi <- lapply(data, function(i) {
-    sapply(i$t, function(Tmi) {
-      bertin_kernel((Tmi - grid_smooth) / b_naive, beta = grid_tibble$H)
-    }) |> (\(x) x / rowSums(x, na.rm = TRUE))() |>
-      (\(x) {x[is.nan(x)] <- 0; x})()
-  })
-
-
-  #obtain smoothed curves
-  #output: G x N matrix
-  X_hat <- mapply(function(W, Y) {
-    W %*% Y$x
-  }, Wmi, data)
-
-  #might be a problem with numerical accuracy when computing manually
-  #X_bar <- rowMeans(X_hat, na.rm = TRUE)
-  # diff_var <- apply(X_hat, 2, function(x) (x - X_bar)^2)
-  # var_Xt <- rowMeans(diff_var, na.rm = TRUE)
   var_Xt <- apply(X_hat, 1, var, na.rm = TRUE)
-  E_Xt2 <- rowMeans(X_hat^2, na.rm = TRUE)
-  #we have G X G matrix for each curve
+  E_Xt2 <- rowMeans(X_hat**2, na.rm = TRUE)
+
+  #G X G matrix for each curve
   X_hat_prod <- lapply(seq_along(data), function(i) {
     X_hat[, i] %*% t(X_hat[, i])
   })
+
   #use modifiedSum to ensure NAs do not affect the computation
   modifiedSum <- function(x, y) {
     replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
   }
 
-  X_bar_prod <- Reduce(modifiedSum, X_hat_prod)/length(X_hat_prod)
+  X_bar_prod <- Reduce(modifiedSum, X_hat_prod) / length(X_hat_prod)
 
   diff_var_prod <- lapply(X_hat_prod, function(i) {
-    (i - X_bar_prod)^2
+    (i - X_bar_prod)**2
   })
 
   var_XtXs <- Reduce(modifiedSum, diff_var_prod)/length(diff_var_prod)
 
   EXtXs2 <- lapply(X_hat_prod, function(i) {
     i^2
-  }) |> (\(x) Reduce(modifiedSum, x)/length(x))()
+  }) |> (\(x) Reduce(modifiedSum, x) / length(x))()
 
   list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2,
        EXtXs2 = EXtXs2)
@@ -349,7 +325,7 @@ estimate_variance_curves <- function(data, params, grid_smooth,
 #' @param init_b Initialised Hölder exponent.
 #' @param init_L Initialised Hölder constant.
 #' @param m Average number of sampling points per curve.
-#' @returns A scalar of vector, depending on the inputs.
+#' @returns A scalar or vector, depending on the inputs.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
 #' @export
@@ -393,9 +369,11 @@ bertin_smoother <- function(data, grid, bandwidth) {
       (outer(i$t, grid, FUN = "-") / bandwidth) |>
         bertin_kernel(bandwidth) |> colSums() |>
         (\(x) x / (length(i$t) * bandwidth))()
-    }) |> t() |> pmax(1/100)
+    }) |> t()
 
-  theta_num / theta_denom
+  theta <- theta_num / theta_denom
+  theta[is.nan(theta)] <- 0
+  theta
 }
 
 
