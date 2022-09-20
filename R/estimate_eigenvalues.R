@@ -132,10 +132,11 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param sigma Noise level of curves.
 #' @param mu0 Density lower bound for time points.
 #' @param nvalues The number of eigenvalues to be kept.
-#' @returns A list of two elements. First is a list of curves, containing
-#' * $t Sampling points.
-#' * $x Observed points.
-#' The second is the vector of bandwidth used to smooth each curve.
+#' @returns A list of two elements, containing
+#' * A list of curves, with
+#'   - $t Sampling points.
+#'   - $x Observed points.
+#' * A vector of bandwidths used to smooth each curve.
 #' @examples
 #' smooth_curves_evalues(curves = curves_list,
 #' grid_bandwidth = seq(0, 1, length.out = 151),
@@ -202,9 +203,10 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param mu0 Density lower bound for time points. Defaults to NULL, which
 #' estimates it.
 #' @param nvalues The number of eigenvalues to be kept.
-#' @returns A list with two elements, containing
+#' @returns A list containing
 #' * Eigenvalues.
-#' * Bandwidths used for smoothing.
+#' * Eigenfunctions.
+#' * Bandwidth used for smoothing curves.
 #' @examples
 #' evalues_adaptive(curves = curves_list,
 #' grid_bandwidth = seq(0, 1, length.out = 151),
