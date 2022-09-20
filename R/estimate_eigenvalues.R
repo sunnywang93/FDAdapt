@@ -36,85 +36,80 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
                            grid_param, sigma, mu0)
 
   #obtain the normalised eigenvalues
-  eigen_elements <- normalise_eigen(cov_gkp$Gamma, nvalues)
+  eigen_elements <- normalise_eigen(cov_gkp$cov, nvalues)
 
   #extract normalised eigenvalues
   evalues_norm <- eigen_elements$values
   efunctions_norm <- eigen_elements$vectors
 
   h_alpha <- sapply(grid_bandwidth, function(h) {
-    cov_gkp$bw$params$constants$L**2 * h^(2*cov_gkp$bw$params$constants$H)
+    cov_gkp$constants$L**2 * h**(2*cov_gkp$constants$H)
   })
 
-  q1_ts_t <- sapply(seq(nvalues), function(j) {
-    efunctions_norm[, j]**2 * h_alpha * cov_gkp$bw$params$kernel_int
+  #G x H matrix for fixed j - column recycling used here
+  bias_t <- sapply(seq(nvalues), function(j) {
+    efunctions_norm[, j]**2 * cov_gkp$kernel_int * h_alpha
   }, simplify = "array")
 
-  q1_ts_t_int <- apply(q1_ts_t, c(2, 3),
-                       function(t) pracma::trapz(grid_smooth, t))
-
-  q1_ts_s_int <- sapply(seq(nvalues), function(j) {
-    cov_gkp$bw$params$moments$EXt2 * efunctions_norm[, j]**2
-  }) |>
-    apply(2, function(s) pracma::trapz(grid_smooth, s))
+  #integrate over the grid: output H x J
+  bias_t_int <- apply(bias_t,
+                      MARGIN = c(2, 3),
+                      FUN = function(t) pracma::trapz(grid_smooth, t))
 
 
-  q1_ts_int <- sapply(seq_along(q1_ts_s_int), function(j) {
-    q1_ts_t_int[, j] * q1_ts_s_int[j]
+  bias_s <- sapply(seq(nvalues), function(j) {
+    cov_gkp$moment2 * efunctions_norm[, j]**2
   })
 
-  #q1_ts = q1_st here
-  q1_term <- 4 * q1_ts_int
+  #output: J x 1
+  bias_s_int <- apply(bias_s, MARGIN = 2,
+                      function(t) pracma::trapz(grid_smooth, t))
 
-  q2_ts_t <- sapply(seq_along(grid_bandwidth), function(h) {
-    sapply(seq(nvalues), function(j) {
-      matrix(efunctions_norm[, j]**2,
-             nrow = length(grid_smooth),
-             ncol = length(grid_smooth)) * (1/cov_gkp$bw$params$Ngamma_ts)[, , h]
-      }, simplify = "array")
-    }, simplify = "array")
+  #output: J x H
+  #equal to s and t, with 2 factor in front of each
+  #so we must multiply by 4 at the end
+  bias_term <- apply(bias_t_int, MARGIN = 1,
+                     function(h) h * bias_s_int)
 
-  #do everything in one shot - this gives everything before integrating
-  #G x G x J x H
-  q2_ts_int <- sapply(seq_along(grid_bandwidth), function(h) {
+  #loop over h and j - column recycling over m2
+  variance_s <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
-      matrix(efunctions_norm[, j]**2, ncol = length(grid_smooth),
-             nrow = length(grid_smooth)) *
-        q2_ts_t[,,j,h] * matrix(cov_gkp$bw$params$moments$EXt2 *
-                                  efunctions_norm[, j]**2,
-                                ncol = length(grid_smooth),
-                                nrow = length(grid_smooth),
-                                byrow = TRUE)
+      outer(efunctions_norm[, j]**2, efunctions_norm[, j]**2) *
+        cov_gkp$moment2 / cov_gkp$Ngamma_st[,,h]
     }, simplify = "array")
   }, simplify = "array")
 
-  #to get s|t term, simply permute our arrays along the 1st and 2nd dimension
-  #integrate out by t, and then s
-  q2_term <- (q2_ts_int + aperm(q2_ts_int, c(2,1,3,4))) |>
-    apply(c(2,3,4), function(x) pracma::trapz(grid_smooth, x)) |>
-    apply(c(2,3), function(x) pracma::trapz(grid_smooth, x)) |>
-    t()
+  variance_t <- aperm(variance_s, c(2, 1, 3, 4))
+  #perform integration iteratively
+  variance_s_int <- apply(variance_s,
+                          MARGIN = c(2, 3, 4),
+                          function(var) pracma::trapz(grid_smooth, var)) |>
+    apply(MARGIN = c(2, 3), function(var) pracma::trapz(grid_smooth, var))
 
-  q3 <- array(cov_gkp$bw$params$moments$EXtXs2,
-                   dim = c(length(grid_smooth),
-                           length(grid_smooth),
-                           length(grid_bandwidth))) *
-    ((1 / cov_gkp$bw$params$WN) - (1 / length(curves)))
+  rm(variance_s)
 
-  q3_term <- sapply(seq(nvalues), function(j) {
-    sapply(seq_along(grid_bandwidth), function(h) {
-      q3[,,h] * matrix(efunctions_norm[, j]^2, nrow = length(grid_smooth),
-                       ncol = length(grid_smooth)) *
-        matrix(efunctions_norm[, j]^2, nrow = length(grid_smooth),
-               ncol = length(grid_smooth), byrow = TRUE)
+  variance_t_int <- apply(variance_t,
+                          MARGIN = c(2, 3, 4),
+                          function(var) pracma::trapz(grid_smooth, var)) |>
+    apply(MARGIN = c(2, 3), function(var) pracma::trapz(grid_smooth, var))
+
+  rm(variance_t)
+
+  variance_term <- max(sigma**2) * variance_s_int +
+    max(sigma**2) * variance_t_int
+
+  regularising_term <- sapply(seq_along(grid_bandwidth), function(h) {
+    sapply(seq(nvalues), function(j) {
+      outer(efunctions_norm[, j]**2, efunctions_norm[, j]**2) *
+        cov_gkp$moment2_prod * (1 / cov_gkp$WN[,, h] - 1 / length(curves))
     }, simplify = "array")
   }, simplify = "array") |>
-    apply(MARGIN = c(2,3,4), function(x) pracma::trapz(grid_smooth, x)) |>
-    apply(MARGIN = c(2,3), function(x) pracma::trapz(grid_smooth, x))
+    apply(MARGIN = c(2, 3, 4), function(t) pracma::trapz(grid_smooth, t)) |>
+    apply(MARGIN = c(2, 3), function(s) pracma::trapz(grid_smooth, s))
 
-  risk <- q1_term + q2_term + q3_term
+  risk <- 4 * bias_term + variance_term + regularising_term
 
-  min_h_index <- apply(risk, MARGIN = 2, which.min)
+  min_h_index <- apply(risk, MARGIN = 1, which.min)
 
   sapply(min_h_index, function(id) grid_bandwidth[id])
 }
