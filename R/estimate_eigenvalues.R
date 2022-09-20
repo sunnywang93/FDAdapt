@@ -12,9 +12,8 @@
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
 #' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
+#' @param sigma Noise level of curves.
+#' @param mu0 Density lower bound for time points.
 #' @param nvalues The number of eigenvalues to be kept.
 #' @returns A vector of length nvalues containing the adaptive bandwidth
 #' for each eigenvalue.
@@ -28,9 +27,10 @@
 #' @export
 
 estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
-                                       grid_param, sigma = NULL, mu0 = NULL,
+                                       grid_param, sigma, mu0,
                                        nvalues)
   {
+
   #first use gkp covariance to estimate "pointwise" eigenfunctions
   cov_gkp <- covariance_ll(curves, grid_bandwidth, grid_smooth, k0,
                            grid_param, sigma, mu0)
@@ -43,20 +43,21 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
   efunctions_norm <- eigen_elements$vectors
 
   h_alpha <- sapply(grid_bandwidth, function(h) {
-    cov_gkp$bw$params$constants$L * h^(2*cov_gkp$bw$params$constants$H)
+    cov_gkp$bw$params$constants$L**2 * h^(2*cov_gkp$bw$params$constants$H)
   })
 
   q1_ts_t <- sapply(seq(nvalues), function(j) {
-    efunctions_norm[, j]^2 * h_alpha * cov_gkp$bw$params$kernel_int
+    efunctions_norm[, j]**2 * h_alpha * cov_gkp$bw$params$kernel_int
   }, simplify = "array")
-
-  q1_ts_s_int <- sapply(seq(nvalues), function(j) {
-    cov_gkp$bw$params$moments$EXt2 * abs(efunctions_norm[, j])
-  }) |>
-    apply(2, function(s) pracma::trapz(grid_smooth, s))
 
   q1_ts_t_int <- apply(q1_ts_t, c(2, 3),
                        function(t) pracma::trapz(grid_smooth, t))
+
+  q1_ts_s_int <- sapply(seq(nvalues), function(j) {
+    cov_gkp$bw$params$moments$EXt2 * efunctions_norm[, j]**2
+  }) |>
+    apply(2, function(s) pracma::trapz(grid_smooth, s))
+
 
   q1_ts_int <- sapply(seq_along(q1_ts_s_int), function(j) {
     q1_ts_t_int[, j] * q1_ts_s_int[j]
@@ -67,8 +68,9 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   q2_ts_t <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
-      matrix(efunctions_norm[, j]^2, nrow = length(grid_smooth),
-             ncol = length(grid_smooth)) * (1/cov_gkp$bw$params$Ngamma_ts)[,,h]
+      matrix(efunctions_norm[, j]**2,
+             nrow = length(grid_smooth),
+             ncol = length(grid_smooth)) * (1/cov_gkp$bw$params$Ngamma_ts)[, , h]
       }, simplify = "array")
     }, simplify = "array")
 
@@ -76,10 +78,10 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
   #G x G x J x H
   q2_ts_int <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
-      matrix(efunctions_norm[, j]^2, ncol = length(grid_smooth),
+      matrix(efunctions_norm[, j]**2, ncol = length(grid_smooth),
              nrow = length(grid_smooth)) *
         q2_ts_t[,,j,h] * matrix(cov_gkp$bw$params$moments$EXt2 *
-                                  efunctions_norm[, j]^2,
+                                  efunctions_norm[, j]**2,
                                 ncol = length(grid_smooth),
                                 nrow = length(grid_smooth),
                                 byrow = TRUE)
@@ -132,9 +134,8 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
 #' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
+#' @param sigma Noise level of curves.
+#' @param mu0 Density lower bound for time points.
 #' @param nvalues The number of eigenvalues to be kept.
 #' @returns A list of two elements. First is a list of curves, containing
 #' * $t Sampling points.
@@ -150,7 +151,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @export
 
 smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
-                                  grid_param, sigma = NULL, mu0 = NULL,
+                                  grid_param, sigma, mu0,
                                   nvalues)
 {
 
@@ -224,12 +225,20 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
                              grid_param, sigma = NULL, mu0 = NULL,
                              nvalues = 10) {
 
+  if(is.null(sigma)) {
+    sigma <- estimate_sigma_recursive(curves)
+  }
+
+  if(is.null(mu0)) {
+    mu0 <- estimate_density(curves)
+  }
+
   smooth_curves <- smooth_curves_evalues(curves, grid_bandwidth,
                                          grid_smooth, k0,
                                          grid_param, sigma, mu0, nvalues)
 
   mu_eigen <- mean_plugin_evalues(curves, smooth_curves$smoothed_curves,
-                                  smooth_curves$bw, grid_smooth, k0, nvalues)
+                                  smooth_curves$bw, grid_smooth, k0)
 
 
   centered_curves <- lapply(smooth_curves$smoothed_curves, function(i) {

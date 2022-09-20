@@ -119,8 +119,8 @@ presmoothing <- function (data,
   interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
   bandwidth_min <- interval_length * 0.05
 
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) |>
-    pmin(bandwidth_min) |> pmax(log(m) / m)
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) #|>
+    #pmin(bandwidth_min) |> pmax(log(m) / m)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
 
