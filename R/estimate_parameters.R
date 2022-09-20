@@ -188,6 +188,7 @@ estimate_L0 <- function(presmoothed_data, H0_list, M) {
   sqrt((V1 + V2) / 2)
 }
 
+
 #' Performs twice recursive estimation of parameters
 #'
 #' `estimate_holder_const` estimates the parameters used for
@@ -229,6 +230,111 @@ estimate_holder_const <- function(data,
   L0 <- estimate_L0(presmoothed, H0, M)
 
   tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
+}
+
+
+#' Estimate moments of curves for downstream analysis
+#'
+#' `estimate_variance_curves` estimates the moments used in
+#' downstream adaptive estimation.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param params Tibble of parameters, containing
+#' - **$H** Estimated regularity.
+#' - **$L** Estimated Hölder constant.
+#' @param grid_smooth Grid of points to smooth curves.
+#' @returns A list, containing
+#' - **$VarXt** Estimated Variance of `Xt`.
+#' - **$VarXtXs** Estimated Variance of `XtXs`.
+#' - **$EXt2** Estimated second moment of `Xt`.
+#' - **$EXtXs2** Estimated second momenet of `XtXs`.
+#' @export
+estimate_variance_curves <- function(data, params, grid_smooth,
+                                     sigma = NULL, mu0 = NULL) {
+  if(is.null(sigma)) {
+    sigma <- estimate_sigma(data)
+  }
+
+  if(is.null(mu0)) {
+    mu0 <- estimate_density(data)
+  }
+
+  m <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
+
+  H_grid_smooth <- pracma::interp1(x = c(0, params$t, 1),
+                                   y = c(params$H[1], params$H,
+                                         params$H[length(params$H)]),
+                                   xi = grid_smooth, method = "linear")
+
+  L_grid_smooth <- pracma::interp1(x = c(0, params$t, 1),
+                                   y = c(params$L[1], params$L,
+                                         params$L[length(params$L)]),
+                                   xi = grid_smooth, method = "linear")
+
+  grid_tibble <- tibble::tibble(t = grid_smooth,
+                                H = H_grid_smooth,
+                                L = L_grid_smooth,
+                                sigma = max(sigma))
+  #now smooth each curve using Bertin's bandwidth
+  c <- (sigma^(2*grid_tibble$H) * grid_tibble$L *
+          ((grid_tibble$H + 1)/ 2 * grid_tibble$H^2 * mu0)^grid_tibble$H)^
+    (1 / (2*grid_tibble$H + 1))
+
+  psi_m <- (1 / m)^(grid_tibble$H / (2 * grid_tibble$H + 1))
+  delta <- min(log(m)^(-1.1), 0.2)
+  b_naive <- pmax(pmin((c * psi_m / grid_tibble$L)^(1 / grid_tibble$H),
+                       delta/4), log(m)/m)
+
+
+
+  #define nadaraya-watson weights
+  #here we use Bertin's bandwidth and kernel
+  Wmi <- lapply(data, function(i) {
+    sapply(i$t, function(Tmi) {
+      bertin_kernel((Tmi - grid_smooth) / b_naive, beta = grid_tibble$H)
+    }) |> (\(x) x / rowSums(x, na.rm = TRUE))() |>
+      (\(x) {x[is.nan(x)] <- 0; x})()
+  })
+
+
+  #obtain smoothed curves
+  #output: G x N matrix
+  X_hat <- mapply(function(W, Y) {
+    W %*% Y$x
+  }, Wmi, data)
+
+  #might be a problem with numerical accuracy when computing manually
+  #X_bar <- rowMeans(X_hat, na.rm = TRUE)
+  # diff_var <- apply(X_hat, 2, function(x) (x - X_bar)^2)
+  # var_Xt <- rowMeans(diff_var, na.rm = TRUE)
+  var_Xt <- apply(X_hat, 1, var, na.rm = TRUE)
+  E_Xt2 <- rowMeans(X_hat^2, na.rm = TRUE)
+  #we have G X G matrix for each curve
+  X_hat_prod <- lapply(seq_along(data), function(i) {
+    X_hat[, i] %*% t(X_hat[, i])
+  })
+  #use modifiedSum to ensure NAs do not affect the computation
+  modifiedSum <- function(x, y) {
+    replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
+  }
+
+  X_bar_prod <- Reduce(modifiedSum, X_hat_prod)/length(X_hat_prod)
+
+  diff_var_prod <- lapply(X_hat_prod, function(i) {
+    (i - X_bar_prod)^2
+  })
+
+  var_XtXs <- Reduce(modifiedSum, diff_var_prod)/length(diff_var_prod)
+
+  EXtXs2 <- lapply(X_hat_prod, function(i) {
+    i^2
+  }) |> (\(x) Reduce(modifiedSum, x)/length(x))()
+
+  list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2,
+       EXtXs2 = EXtXs2)
 }
 
 #' Calculates bandwidth for smoothing
