@@ -130,7 +130,7 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
 
   var_ <- estimate_variance_curves(data = curves, params = params,
                                    grid_smooth = grid_smooth,
-                                   sigma = grid_tibble$sigma,
+                                   sigma = max(grid_tibble$sigma),
                                    mu0 = unique(params$mu0))
 
 
@@ -292,9 +292,15 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
 #' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
 #' @param mu0 Density lower bound for time points. Defaults to NULL, which
 #' estimates it.
-#' @returns A list with two elements, containing
-#' - **$Gamma** Estimated covariance function
-#' - **$bw** Matrix of bandwidths used to smooth each curve.
+#' @returns A list containing
+#' - **$Gamma** Estimated covariance function.
+#' - **$bandwidth** Matrix of bandwidths used to smooth each curve.
+#' - **$constants** Tibble containing Hölder constants.
+#' - **$kernel_int** Integrated kernel.
+#' - **$Ngamma_ts** Harmonic mean of the number of points used to smooth
+#' each curve at `t|s`.
+#' - **$Ngamma_st** Transpose of `Ngamma_ts`.
+#' - **$WN** Total number of points selected for estimation.
 #' @examples
 #' covariance_ll(curves = curves_list,
 #' grid_bandwidth = seq(0, 1, length.out = 151),
@@ -380,6 +386,16 @@ covariance_ll <- function(curves, grid_bandwidth =
       t <- t - 1
     }
   }
-    list(Gamma = Gamma, bw = prod_$bw)
+    list(cov = Gamma,
+         bandwidth = prod_$bw$bw_matrix,
+         constants = prod_$bw$params$constants,
+         kernel_int = prod_$bw$params$kernel_int,
+         Ngamma_ts = prod_$bw$params$Ngamma_ts,
+         Ngamma_st = prod_$bw$params$Ngamma_st,
+         variance = prod_$bw$params$moments$varXt,
+         variance_prod = prod_$bw$params$moments$varXtXs,
+         moment2 = prod_$bw$params$moments$EXt2,
+         moment2_prod = prod_$bw$params$moments$EXtXs2,
+         WN = prod_$bw$params$WN)
 }
 
