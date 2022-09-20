@@ -257,8 +257,7 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
   }) |>
     (\(x) Reduce('+', x))()
 
-  emp_cov <- (1/WN) * weighted_cov
-
+  emp_cov <- weighted_cov / WN
 
   eelements <- lapply(seq(nvalues), function(j) {
     normalise_eigen(emp_cov[,,j], nvalues)
@@ -269,14 +268,12 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
   })
 
   efunctions <- sapply(seq_along(eelements), function(j) {
-    eelements[[j]]$vectors[,j]
+    eelements[[j]]$vectors[, j]
   })
 
-  list(eelements = list(values = evalues,
-                        functions = efunctions),
-      #cov = emp_cov,
-      bw = smooth_curves$bw)
-      #smooth_curves = smooth_curves$smoothed_curves)
+  list(eigenvalues = evalues,
+       eigenfunctions = efunctions,
+       bandwidth = smooth_curves$bw)
 }
 
 
