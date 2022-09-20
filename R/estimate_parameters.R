@@ -119,7 +119,7 @@ presmoothing <- function (data,
   # interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
   # bandwidth_min <- interval_length * 0.05
 
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m) #|>
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m) #|>
     #pmin(bandwidth_min) |> pmax(log(m) / m)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
@@ -160,12 +160,14 @@ estimate_H0 <- function(presmoothed_data){
 #' Performs estimation of Hölder constant
 #'
 #' `estimate_L0` estimates the Hölder constant of presmoothed curves,
-#' typically as output from the function `presmoothing`.
+#' typically as output from the function `presmoothing`. Smooths the
+#' input values of `H0` by splines to get more stable results.
 #'
 #' @param presmoothed_data A list, containing
 #' - **$x** Smoothed data points.
 #' @param H0_list Vector containing Hölder exponents, typically as
 #' output from `estimate_H0`.
+#' @param t0_list Vector containing the sampling points of `H0_list`.
 #' @param M Mean number of points on each curve.
 #' @returns A vector containing the estimated values at the
 #' sampling points of presmoothed curves.
@@ -173,15 +175,16 @@ estimate_H0 <- function(presmoothed_data){
 #' estimation of irregular mean and covariance functions.
 #' @export
 
-estimate_L0 <- function(presmoothed_data, H0_list, M) {
+estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 
-  H0 <- H0_list %>% purrr::map_dbl(~.x - 1/log(M)**1.01)
+  H0_smooth <- H0_list |> purrr::map_dbl(~.x - 1/log(M)**1.01)
+  #H0_smooth <- stats::smooth.spline(x = t0_list, y = H0_list, nknots = 8)$y
 
-  V1 <- purrr::map2_dbl(presmoothed_data, H0,
+  V1 <- purrr::map2_dbl(presmoothed_data, H0_smooth,
                       ~ mean((.x$x[, 2] - .x$x[, 1])**2, na.rm = TRUE) /
                         abs(.x$t[2] - .x$t[1])**(2 * .y))
 
-  V2 <- purrr::map2_dbl(presmoothed_data, H0,
+  V2 <- purrr::map2_dbl(presmoothed_data, H0_smooth,
                   ~ mean((.x$x[, 3] - .x$x[, 2])**2, na.rm = TRUE) /
                     abs(.x$t[3] - .x$t[2])**(2 * .y))
 
@@ -227,7 +230,7 @@ estimate_holder_const <- function(data,
 
   M <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
 
-  L0 <- estimate_L0(presmoothed, H0, M)
+  L0 <- estimate_L0(presmoothed, H0, grid_estim, M)
 
   tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
 }
@@ -281,11 +284,11 @@ estimate_variance_curves <- function(data, params, grid_smooth,
 
 
   #now smooth each curve using Bertin's bandwidth
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b , init_L, m)
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b = 1, init_L = 1, m)
   X_hat <- bertin_smoother(data, grid_smooth, bandwidth) |> t()
 
-  var_Xt <- apply(X_hat, 1, var, na.rm = TRUE)
-  E_Xt2 <- rowMeans(X_hat**2, na.rm = TRUE)
+  E_Xt2 <- apply(X_hat**2, 1, mean, na.rm = TRUE)
+  var_Xt <- E_Xt2 - (apply(X_hat, 1, mean, na.rm = TRUE)**2)
 
   #G X G matrix for each curve
   X_hat_prod <- lapply(seq_along(data), function(i) {
