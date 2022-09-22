@@ -204,8 +204,8 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' estimates it.
 #' @param nvalues The number of eigenvalues to be kept.
 #' @returns A list containing
-#' * Eigenvalues.
-#' * Eigenfunctions.
+#' * Normalised eigenvalues.
+#' * Normalised eigenfunctions.
 #' * Bandwidth used for smoothing curves.
 #' @examples
 #' evalues_adaptive(curves = curves_list,
@@ -222,8 +222,15 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
                              grid_param, sigma = NULL, mu0 = NULL,
                              nvalues = 10) {
 
+  m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
+
   if(is.null(sigma)) {
-    sigma <- estimate_sigma_recursive(curves)
+    if(m <= 50) {
+      sigma <- estimate_sigma(curves)
+    }
+    else {
+      sigma <- estimate_sigma_recursive(curves)
+    }
   }
 
   if(is.null(mu0)) {

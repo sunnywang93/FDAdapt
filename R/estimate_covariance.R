@@ -319,9 +319,15 @@ covariance_ll <- function(curves, grid_bandwidth =
                           k0 = 1, grid_param = seq(0.1, 0.9, length.out = 20),
                           sigma = NULL, mu0 = NULL) {
 
+  m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
 
   if(is.null(sigma)) {
-    sigma <- estimate_sigma_recursive(curves)
+    if(m <= 50) {
+      sigma <- estimate_sigma(curves)
+    }
+    else {
+      sigma <- estimate_sigma_recursive(curves)
+    }
   }
 
   if(is.null(mu0)) {
