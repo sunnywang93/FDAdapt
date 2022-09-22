@@ -13,14 +13,14 @@
 
 estimate_sigma <- function(data) {
   Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-  delta <- log(log(Mbar)) / Mbar
-  indic <- data |>
-    purrr::map(~as.numeric(abs(diff(sort(.x$t, decreasing = TRUE))) <= delta))
-  diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))^2)
+  delta <- 2 / Mbar
+  diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
+  idx <- data |> purrr::map(~order(.x$x, decreasing = TRUE))
+  indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
   sum_diffsq <- purrr::map2_dbl(diffsq, indic, ~sum(.x * .y))
   denom <- indic |> purrr::map_dbl(~sum(.x))
   sum_diffsq_norm <- sum_diffsq / (2 * denom)
-  sqrt(mean(sum_diffsq_norm))
+  sqrt(mean(sum_diffsq_norm, na.rm = TRUE))
 }
 
 #' Estimate noise level of curves with presmoothing
@@ -116,11 +116,11 @@ presmoothing <- function (data,
     mu0 <- estimate_density(data)
   }
 
-  # interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
-  # bandwidth_min <- interval_length * 0.05
+  interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
+  bandwidth_min <- interval_length * 0.15
 
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m) #|>
-    #pmin(bandwidth_min) |> pmax(log(m) / m)
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m) |>
+    pmin(bandwidth_min)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
 
