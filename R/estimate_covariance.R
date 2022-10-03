@@ -314,7 +314,7 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
 
 
 covariance_ll <- function(curves, grid_bandwidth =
-                          lseq(0.005, 0.1, length.out = 151),
+                          lseq(0.01, 0.1, length.out = 51),
                           grid_smooth = seq(0, 1, length.out = 101),
                           k0 = 1, grid_param = seq(0.1, 0.9, length.out = 20),
                           sigma = NULL, mu0 = NULL) {
@@ -322,12 +322,7 @@ covariance_ll <- function(curves, grid_bandwidth =
   m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
 
   if(is.null(sigma)) {
-    if(m <= 50) {
-      sigma <- estimate_sigma(curves)
-    }
-    else {
-      sigma <- estimate_sigma_recursive(curves)
-    }
+    sigma <- estimate_sigma(curves)
   }
 
   if(is.null(mu0)) {
@@ -359,10 +354,16 @@ covariance_ll <- function(curves, grid_bandwidth =
 
   Xt_cond <- smooth_curves_mean_plugin_cov(curves, grid_smooth,
                                            k0, bandwidth = prod_$bw$bw_matrix)
-  mu_ts <- purrr::map2(Xt_cond, wt_cond, ~.x * .y) |>
-    (\(x) Reduce('+', x) / WN)() |>
-    (\(x) x * t(x))()
-  Gamma <- gamma - mu_ts
+
+  mu_ts <- purrr::map2(wt_cond, Xt_cond, ~t(.x) * .y) |>
+    (\(x) Reduce('+', x) / t(WN))()
+
+  mu_st <- purrr::map2(wt_cond, Xt_cond, ~.x * t(.y)) |>
+    (\(x) Reduce('+', x) / WN)()
+
+  mu <- mu_ts * mu_st
+
+  Gamma <- gamma - mu
 
   #final step: replace diagonal band
   for (t in 1:ncol(Gamma)) {

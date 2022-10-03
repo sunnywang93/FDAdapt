@@ -315,26 +315,26 @@ smooth_curves_mean_plugin_cov <- function(curves, grid_smooth,
 
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
 
-  #dim Mi x G
-  Wm_num <- purrr::map(curves, ~outer(.x$t, grid_smooth, "-")) |>
-    lapply(function(Ti) {
-      sapply(seq_along(grid_smooth), function(t) {
-        outer(Ti[, t], bandwidth[, t], FUN = "/")
-      }, simplify = "array") |> epa_kernel()
-    })
+  T_diff <- purrr::map(curves, ~outer(.x$t, grid_smooth, FUN = "-"))
 
-  Wm_denom <- purrr::map(Wm_num, ~colSums(.x, na.rm = TRUE)) |>
-    purrr::map2(M_length, ~replicate(.y, .x)) |>
-    purrr::map(~aperm(.x, c(3, 1, 2)))
-
-  Wm <- purrr::map2(Wm_num, Wm_denom, ~(.x / .y) |>
-                      (\(x) replace(x, is.nan(x), 0))())
-
-  Xt <- purrr::map2(curves, Wm, function(i, w) {
-    sapply(seq_along(grid_smooth), function(s) {
-      t(w[,,s]) %*% i$x
-    })
+  Wm_num <- lapply(T_diff, function(i) {
+    sapply(seq_along(grid_smooth), function(t) {
+      epa_kernel(outer(i[, t], bandwidth[, t], FUN = "/"))
+    }, simplify = "array")
   })
+
+  Wm_denom <- purrr::map(Wm_num, ~colSums(.x, na.rm = TRUE))
+
+  Wm <- purrr::map2(Wm_num, Wm_denom,
+                    ~sapply(seq_along(grid_smooth),
+                            function(s) sweep(.x[,,s], 2, .y[,s], FUN = "/"),
+                            simplify = "array")) |>
+    purrr::map(~replace(.x, is.nan(.x), 0))
+
+  Xt <- purrr::map2(Wm, curves,
+                    ~sapply(seq_along(grid_smooth),
+                            function(s) t(.x[,,s]) %*% .y$x),
+                    simplify = "array")
 
   return(Xt)
 }
