@@ -101,16 +101,17 @@ presmoothing <- function (data,
                           init_b = 1,
                           init_L = 1,
                           sigma = NULL,
-                          mu0 = NULL)
+                          mu0 = NULL,
+                          k0_list = 2)
 {
   m <- data |> purrr::map_dbl(~ length(.x$t)) |> mean()
 
-  delta <- min(log(m)^(-1.1), 0.2)
+  delta <- min(log(m)^(-2.5), 0.2)
   t1_list <- t0_list - delta / 2
   t3_list <- t0_list + delta / 2
 
   if(is.null(sigma)) {
-    sigma <- estimate_sigma_recursive(data)
+    sigma <- estimate_sigma(data)
   }
   if(is.null(mu0)) {
     mu0 <- estimate_density(data)
@@ -119,7 +120,13 @@ presmoothing <- function (data,
   interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
   bandwidth_min <- interval_length * 0.15
 
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m) |>
+  # H0_order <- estimate_H0_order_list(data, t0_list = t0_list,
+  #                                    k0_list = k0_list, sigma = sigma)
+
+  # bandwidth <- bertin_bandwidth(sigma, mu0, init_b = H0_order, init_L, m) |>
+  #   mean()
+
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m)|>
     pmin(bandwidth_min)
 
   t_list <- rbind(t1_list, t0_list, t3_list)
@@ -177,8 +184,9 @@ estimate_H0 <- function(presmoothed_data){
 
 estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 
-  H0_smooth <- H0_list |> purrr::map_dbl(~.x - 1/log(M)**1.01)
+  #H0_smooth <- H0_list |> purrr::map_dbl(~.x - 1/log(M)**1.01)
   #H0_smooth <- stats::smooth.spline(x = t0_list, y = H0_list, nknots = 8)$y
+  H0_smooth <- H0_list
 
   V1 <- purrr::map2_dbl(presmoothed_data, H0_smooth,
                       ~ mean((.x$x[, 2] - .x$x[, 1])**2, na.rm = TRUE) /
@@ -192,7 +200,229 @@ estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 }
 
 
-#' Performs twice recursive estimation of parameters
+#' Estimates local regularity using splines
+#'
+#' Estimates the local regularity `H(t)` by presmoothing, where
+#' presmoothing is performed using splines on irregularly sampled curves.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param t0_list Vector of sampling points which presmoothing
+#'  is performed.
+#' @returns A vector containing `H(t)` evaluated at `t0_list`.
+#' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
+#' estimation of irregular mean and covariance functions.
+#' @export
+
+
+presmoothing_splines <- function(data, t0_list = seq(.1, .9, l = 20)) {
+
+  m <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
+  delta <- min(log(m)^(-1.1), 0.2)
+
+  t1_list <- t0_list - delta / 2
+  t3_list <- t0_list + delta / 2
+  t_list <- c(t1_list, t0_list, t3_list)
+
+  spline_model <- purrr::map(data,
+                             ~stats::smooth.spline(x = .x$t, y = .x$x,
+                                                   cv = TRUE))
+
+  y_pred <- purrr::map(spline_model, ~predict(.x, x = sort(t_list)))
+
+  idx1 <- seq(1, length(t_list), by = 3)
+  idx2 <- seq(2, length(t_list), by = 3)
+  idx3 <- seq(3, length(t_list), by = 3)
+
+  V1 <- purrr::map(y_pred, ~(.x$y[idx1] - .x$y[idx3])**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  V2 <- purrr::map(y_pred, ~(.x$y[idx1] - .x$y[idx2])**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  H0 <- (log(V1) - log(V2)) / 2*log(2)
+
+  Q1 <- V1 / abs(t1_list - t3_list)**(2 * H0)
+
+  Q2 <- V2 / abs(t0_list - t3_list)**(2 * H0)
+
+  L0 <- sqrt((Q1 + Q2) / 2)
+
+  tibble::tibble(H = H0, L = L0)
+}
+
+#' Estimates regularity at a point
+#'
+#' Estimates the regularity of a curve at a fixed point `t0`.
+#' Usually used as an auxiliary function for `estimate_H0_order_list` to
+#' estimate the local regularity on a grid of points, and should be used
+#' only for curves that have regularity less than 1.
+#'
+#' @param data A list containing the raw data points with two entries:
+#' - **$t** Sampling points.
+#' - **$x** Observed Points
+#' @param t0 Time point at which `H(t0)` should be computed.
+#' @param k0 Number of closest neighbours to be used in estimation.
+#' If `k0 < 2`, the regularity will be set to 1.
+#' @param sigma Noise level of the curves, assumed to be known. If
+#' unknown, one can use the `estimate_sigma` function to estimate it.
+#' @return Numeric for `H(t0)`.
+#' @references Golovkine S., Klutchnikoff N., Patilea V. (2022) - Learning the
+#' smoothness of noisy curves with application to online curve estimation.
+#' @export
+
+
+estimate_H0_order <- function(data, t0 = 0, k0 = 2, sigma) {
+
+  num_first <- 2 * log(2)
+  num_second <- 0
+  denom <- 2 * log(2)
+
+  #obtain index of 4k0 - 3th closest point to t0 on each curve
+  idx_4k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[4 * k0 - 3])
+
+  #obtain index of 2k0 - 1th closest point to t0 on each curve
+  idx_2k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[2 * k0 - 1])
+
+  #obtain index of k0th closest point to t0 on each curve
+  idx_k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[k0])
+
+  #compute 2k-1th order statistic
+  a <- purrr::imap_dbl(data, ~(.x$x[idx_4k[.y]] - .x$x[idx_2k[.y]])**2) |>
+    mean(na.rm = TRUE)
+
+  #compute 4k-3th order statistic
+  b <- purrr::imap_dbl(data, ~(.x$x[idx_2k[.y]] - .x$x[idx_k[.y]])**2) |>
+    mean(na.rm = TRUE)
+
+  if ((a > 2 * sigma**2) & (b > 2 * sigma**2) & (a > b)) {
+    num_first <- log(a - 2 * sigma**2)
+    num_second <- log(b - 2 * sigma**2)
+  }
+
+  (num_first - num_second) / denom
+}
+
+
+#' Estimates regularity on a grid of points
+#'
+#' Estimates the local regularity on a grid of points
+#' `t0_list`, using order statistics (see references). Makes use
+#' of the function `estimate_H0_order` which estimates
+#' the local regularity at a point `t0`. Should only be used for curves
+#' with a regularity less than one.
+#'
+#' @param data A list containing the raw data points with two entries:
+#' - **$t** Sampling points.
+#' - **$x** Observed Points
+#' @param t0_list A vector containing the sampling points at which
+#' `H(t)` should be estimated.
+#' @param k0_list The number of neighbours to be considered in
+#' estimation corresponding to the vector `t0_list`. To set
+#' the same number of neighbours used in estimation, use a numeric.
+#' @param sigma Noise level of the curves, assumed to be known. If
+#' unknown, one can use the `estimate_sigma` function to estimate it.
+#' @return A vector of points.
+#' @references Golovkine S., Klutchnikoff N., Patilea V. (2022) - Learning the
+#' smoothness of noisy curves with application to online curve estimation.
+
+
+estimate_H0_order_list <- function(data, t0_list, k0_list, sigma) {
+  purrr::map2_dbl(t0_list, k0_list,
+                  ~estimate_H0_order(data, t0 = .x, k0 = .y, sigma = sigma))
+}
+
+
+#' Estimates Hölder constant at a fixed point
+#'
+#' Estimates the Hölder constant at a fixed point `t0`
+#' using order statistics (see references). Should only be used for curves
+#' with a regularity less than one.
+#'
+#' @param data A list containing the raw data points with two entries:
+#' - **$t** Sampling points.
+#' - **$x** Observed Points
+#' @param t0 Numeric, the sampling point to estimate at which `L(t0)`
+#' should be estimated.
+#' @param H0 Numeric, the regularity `H(t0)`.
+#' @param k0 Number of neighbours to be used in estimation.
+#' @param sigma Noise level of the curves, assumed to be known. If
+#' unknown, one can use the `estimate_sigma` function to estimate it.
+#' @return A numeric.
+#' @references Golovkine S., Klutchnikoff N., Patilea V. (2022) - Learning the
+#' smoothness of noisy curves with application to online curve estimation.
+
+estimate_L0_order <- function(data, t0, H0, k0, sigma) {
+  num <- 1
+  denom <- 1
+
+  #obtain index of 4k0 - 3th closest point to t0 on each curve
+  idx_4k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[4 * k0 - 3])
+
+  #obtain index of 2k0 - 1th closest point to t0 on each curve
+  idx_2k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[2 * k0 - 1])
+
+  #obtain index of k0th closest point to t0 on each curve
+  idx_k <- purrr::map_dbl(data, ~order(abs(.x$t - t0))[k0])
+
+  #compute 2k-1th order statistic
+  a <- purrr::imap_dbl(data, ~(.x$x[idx_4k[.y]] - .x$x[idx_2k[.y]])**2) |>
+    mean(na.rm = TRUE)
+
+  #compute 4k-3th order statistic
+  b <- purrr::imap_dbl(data, ~(.x$x[idx_2k[.y]] - .x$x[idx_k[.y]])**2) |>
+    mean(na.rm = TRUE)
+
+  c <- purrr::imap_dbl(data,
+                       ~abs(.x$t[idx_4k[.y]] - .x$t[idx_2k[.y]])**(2 * H0)) |>
+    mean(na.rm = TRUE)
+
+  d <- purrr::imap_dbl(data,
+                       ~abs(.x$t[idx_2k[.y]] - .x$t[idx_k[.y]])**(2 * H0)) |>
+    mean(na.rm = TRUE)
+
+  if((a > b) & (c > d)) {
+    num <- a - b
+    denom <- c - d
+  }
+  sqrt(num / denom)
+}
+
+#' Estimates Hölder constant on a grid of points
+#'
+#' Estimates the Hölder constant on a grid of points `t0_list`
+#' using order statistics (see references). Makes use of the function
+#' `estimate_L0_order`. Should only be used for curves
+#' with a regularity less than one.
+#'
+#' @param data A list containing the raw data points with two entries:
+#' - **$t** Sampling points.
+#' - **$x** Observed Points
+#' @param t0_list Vector, containing the sampling points at which
+#' `L(t)` should be estimated.
+#' @param H0_list Vector, containing the points `H(t)` estimated on the
+#' grid `t0_list`. One can use `estimate_H0_order_list` to estimate `H(t)`
+#' at `t0_list`.
+#' @param k0_list The number of neighbours to be considered in estimation
+#' corresponding to the vector t0_list. To set the same number of
+#' neighbours used in estimation, use a numeric.
+#' @param sigma Noise level of the curves, assumed to be known. If
+#' unknown, one can use the `estimate_sigma` function to estimate it.
+#' @return A vector of points.
+#' @references Golovkine S., Klutchnikoff N., Patilea V. (2022) - Learning the
+#' smoothness of noisy curves with application to online curve estimation.
+
+
+estimate_L0_order_list <- function(data, t0_list, k0_list, H0_list, sigma) {
+  purrr::pmap_dbl(list(t0_list, H0_list, k0_list), function(t0, H0, k0)
+    estimate_L0_order(data, t0 = t0, k0 = k0, H0 = H0, sigma = sigma))
+}
+
+
+
+#' Performs estimation of parameters
 #'
 #' `estimate_holder_const` estimates the parameters used for
 #' downstream analysis, typically for functions such as
@@ -206,6 +436,9 @@ estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 #' estimates it.
 #' @param mu0 Density lower bound for time points. Defaults to NULL,
 #' which estimates it.
+#' @param presmoothing Presmoothing option. Can be either "splines",
+#' "bertin" or FALSE. If FALSE, uses the order statistics approach instead
+#' (see `estimate_H0_order`).
 #' @returns Tibble with estimated parameters as columns.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
@@ -214,24 +447,41 @@ estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 estimate_holder_const <- function(data,
                                   grid_estim = seq(0.2, 0.8, length.out = 20),
                                   sigma = NULL,
-                                  mu0 = NULL) {
+                                  mu0 = NULL,
+                                  presmoothing = "splines") {
 
   if(is.null(sigma)) {
-    sigma <- estimate_sigma_recursive(data)
+    sigma <- estimate_sigma(data)
   }
   if(is.null(mu0)) {
     mu0 <- estimate_density(data)
   }
 
-  presmoothed <- presmoothing(data, t0_list = grid_estim, sigma = sigma,
-                              mu0 = mu0)
+  if(presmoothing == "splines") {
+    constants <- presmoothing_splines(data, t0_list = grid_estim)
+    H0 <- constants$H
+    L0 <- constants$L
+  }
 
-  H0 <- estimate_H0(presmoothed)
+  else if(presmoothing == "bertin") {
+    presmoothed <- presmoothing(data, t0_list = grid_estim, sigma = sigma,
+                                mu0 = mu0)
 
-  M <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
+    H0 <- estimate_H0(presmoothed)
 
-  L0 <- estimate_L0(presmoothed, H0, grid_estim, M)
+    M <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
 
+    L0 <- estimate_L0(presmoothed, H0, grid_estim, M)
+  }
+
+  else {
+    H0 <- estimate_H0_order_list(data, t0_list = grid_estim,
+                                 k0_list = 2, sigma = sigma)
+
+    L0 <- estimate_L0_order_list(data, t0_list = grid_estim,
+                                 k0_list = 2, H0_list = H0,
+                                 sigma = sigma)
+  }
   tibble::tibble(t = grid_estim, H = H0, L = L0, sigma = sigma, mu0 = mu0)
 }
 
