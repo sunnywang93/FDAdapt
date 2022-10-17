@@ -1,26 +1,30 @@
-#' Estimate noise level of curves using only observed points
+#' Estimate pointwise noise level of curves using only observed points
 #'
-#' #' `estimate_sigma` estimates the variance of curves, using only
-#' information from curves. Used as a preliminary estimate of sigma,
-#' usually as a first pass to the function `estimate_sigma_recursive`.
+#' `estimate_sigma` estimates the variance of curves, using only
+#' information from curves.
 #'
 #' @param data List, where each element represents a curve. Each curve
 #' must be a list with two entries:
 #'  * $t Sampling points.
 #'  * $x Observed points.
-#' @returns A number.
+#' @param grid_param Vector containing the sampling points to estimate
+#' the noise.
+#' @returns Vector with the same length as `grid_param`.
 #' @export
 
-estimate_sigma <- function(data) {
+estimate_sigma <- function(data, grid_param = seq(.1, .9, length.out = 20)) {
   Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-  delta <- 2 / Mbar
-  diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
-  idx <- data |> purrr::map(~order(.x$x, decreasing = TRUE))
-  indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
-  sum_diffsq <- purrr::map2_dbl(diffsq, indic, ~sum(.x * .y))
-  denom <- indic |> purrr::map_dbl(~sum(.x))
-  sum_diffsq_norm <- sum_diffsq / (2 * denom)
-  sqrt(mean(sum_diffsq_norm, na.rm = TRUE))
+  delta <- 2 * sqrt(log(Mbar)) / Mbar
+  #diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
+  idx <- data |> purrr::map(~order(.x$t))
+  diffsq <- data |> purrr::map2(idx, ~c(0, diff(.x$x[.y])**2))
+  #indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
+  indic <- purrr::map(data,
+                      ~(abs(outer(.x$t, grid_param, FUN = "-")) <= delta) * 1)
+  sum_diffsq <- purrr::map2(diffsq, indic, ~t(.y) %*% .x)
+  denom <- purrr::map(indic, ~colSums(.x, na.rm = TRUE))
+  sum_diffsq_norm <- purrr::map2(sum_diffsq, denom, ~.x / (2 * .y))
+  c(sqrt(Reduce('+', sum_diffsq_norm) / length(sum_diffsq_norm)))
 }
 
 #' Estimate noise level of curves with presmoothing
