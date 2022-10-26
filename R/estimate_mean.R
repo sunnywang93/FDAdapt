@@ -1,29 +1,3 @@
-#' Generate exponential grid for optimisation
-#'
-#' @param from Starting point of grid.
-#' @param to End point of grid.
-#' @param length.out Number of points in the grid.
-#' @returns A vector containing grid values.
-#' @examples
-#' lseq(from = 1, to = 100, length.out = 51)
-#' @export
-
-lseq <- function (from = 1, to = 100, length.out = 51) {
-  exp(seq(log(from), log(to), length.out = length.out))
-}
-
-#' @export
-epa_kernel <- function(y) {
-  3/4 * (1 - y^2) * (abs(y) <= 1)
-}
-
-
-#' @export
-bertin_kernel <- function(x, beta){
-  ((1 + beta)/ (2 * beta))  * (1 - abs(x)^beta) * (abs(x) <= 1)
-}
-
-
 #' Estimate adaptive bandwidth for mean estimation
 #'
 #' `estimate_bandwidth_mean` estimates the adaptive bandwidth
@@ -368,6 +342,7 @@ mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
       outer(bandwidth, FUN = "<=") * 1
   })
 
+
   wt <- lapply(indic, function(i) {
     colSums(i, na.rm = TRUE) |>
       (\(x) (x >= k0) * 1)()
@@ -381,9 +356,5 @@ mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
   list(mu = sum_curves / WN,
        wt = wt)
 }
-
-
-
-
 
 

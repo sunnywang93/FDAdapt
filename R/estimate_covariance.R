@@ -12,9 +12,12 @@
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu** Estimated density of time points.
 #' estimates it.
 #' @returns A list with two elements, containing
 #' * A matrix of bandwidth for every point `(t,s)`.
@@ -27,41 +30,25 @@
 #'   - **$N_gamma_st** Harmonic mean of the number of points used for
 #'   smoothing each curve at `(s|t)`.
 #'   - **$WN** Total number of curves selected for estimation.
-#' @examples
-#' estimate_bandwidth_covariance(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
 
 estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
-                          grid_smooth, k0, grid_param, sigma = NULL,
-                          mu0 = NULL)
+                                          grid_smooth, k0, params)
 {
 
-  params <- estimate_holder_const(curves, sigma = sigma, mu0 = mu0,
-                                  grid_estim = grid_param)
+  interp_grid <- c(0, params$t, 1)
 
-  H_grid_smooth <- pracma::interp1(x = c(0, grid_param, 1),
-                                   y = c(params$H[1], params$H,
-                                         params$H[length(params$H)]),
-                                   xi = grid_smooth, method = "linear")
+  var_interp <- as.matrix(params[, c("H", "L", "sigma", "mu0")])
 
-  L_grid_smooth <- pracma::interp1(x = c(0, grid_param, 1),
-                                   y = c(params$L[1], params$L,
-                                         params$L[length(params$L)]),
-                                   xi = grid_smooth, method = "linear")
+  interp_mat <- apply(var_interp, MARGIN = 2,
+                      function(x) pracma::interp1(x = interp_grid,
+                                                  y = c(x[1], x, x[nrow(var_interp)]),
+                                                  xi = grid_smooth))
 
-
-  grid_tibble <- tibble::tibble(t = grid_smooth,
-                                H = H_grid_smooth,
-                                L = L_grid_smooth,
-                                sigma = max(sigma))
+  grid_tibble <- tibble::as_tibble(cbind(t = grid_smooth, interp_mat))
 
   cst_kernel <- 1.5 * (1 / (1 + 2 * grid_tibble$H) - 1 / (3 + 2 * grid_tibble$H))
 
@@ -129,9 +116,7 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
   Ngamma_st <- aperm(Ngamma_ts, c(2, 1, 3))
 
   var_ <- estimate_variance_curves(data = curves, params = params,
-                                   grid_smooth = grid_smooth,
-                                   sigma = max(grid_tibble$sigma),
-                                   mu0 = unique(params$mu0))
+                                   grid_smooth = grid_smooth)
 
 
   q1_ts <- sapply(seq_along(grid_smooth), function(s) {
@@ -155,7 +140,7 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
                 nrow = length(grid_smooth))
 
   #q2(t|s) = q2(s|t) = q2
-  q2 <- max(sigma**2) * (qq2 + t(qq2))
+  q2 <- max(grid_tibble$sigma**2) * (qq2 + t(qq2))
 
   q2_ts_term <- array(q2, dim = c(length(grid_smooth),
                                length(grid_smooth),
@@ -186,7 +171,6 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
                      Ngamma_ts = Ngamma_ts,
                      Ngamma_st = Ngamma_st,
                      WN = WN))
-
 }
 
 #' Smooth curves using adaptive bandwidths for covariance function
@@ -204,9 +188,12 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu** Estimated density of time points.
 #' estimates it.
 #' @returns A list with two elements, containing
 #' * The product of curves `XtXs`.
@@ -221,30 +208,20 @@ estimate_bandwidth_covariance <- function(curves, grid_bandwidth,
 #'   - **$N_gamma_st** Harmonic mean of the number of points used for
 #'   smoothing each curve at `(s|t)`.
 #'   - **$WN** Total number of curves selected for estimation.
-#' @examples
-#' smooth_curves_covariance(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
 
 smooth_curves_covariance <- function(curves, grid_bandwidth,
-                                     grid_smooth, k0, grid_param,
-                                     sigma, mu0)
+                                     grid_smooth, k0, params)
   {
 
   bandwidth_list <- estimate_bandwidth_covariance(curves,
                                                   grid_bandwidth,
                                                   grid_smooth,
                                                   k0,
-                                                  grid_param,
-                                                  sigma,
-                                                  mu0)
+                                                  params)
 
   bandwidth_matrix <- bandwidth_list$bw_matrix
 
@@ -275,10 +252,10 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
   list(prod = XtXs, bw = bandwidth_list)
 }
 
-#' Estimate covariance function using adaptive bandwidths
+#' Estimate covariance function using adaptive pointwise bandwidths
 #'
 #' `covariance_ll` estimates the covariance function using curves that
-#' have been smoothed using an adaptive bandwidth.
+#' have been smoothed using an adaptive pointwise bandwidth.
 #'
 #' @param curves List, where each element represents a curve. Each curve
 #' must be a list with two entries:
@@ -288,50 +265,37 @@ smooth_curves_covariance <- function(curves, grid_bandwidth,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu** Estimated density of time points.
 #' estimates it.
 #' @returns A list containing
-#' - **$Gamma** Estimated covariance function.
+#' - **$cov** Estimated covariance function.
 #' - **$bandwidth** Matrix of bandwidths used to smooth each curve.
 #' - **$constants** Tibble containing Hölder constants.
 #' - **$kernel_int** Integrated kernel.
 #' - **$Ngamma_ts** Harmonic mean of the number of points used to smooth
 #' each curve at `t|s`.
 #' - **$Ngamma_st** Transpose of `Ngamma_ts`.
+#' - **$variance** Variance of `Xt`.
+#' - **$variance_prod** Variance of `XtXs`.
+#' - **$moment2** Second moment of `Xt`.
+#' - **$moment2_prod** Second moment of `XtXs`.
 #' - **$WN** Total number of points selected for estimation.
-#' @examples
-#' covariance_ll(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
 
-covariance_ll <- function(curves, grid_bandwidth =
-                          lseq(0.01, 0.1, length.out = 51),
-                          grid_smooth = seq(0, 1, length.out = 101),
-                          k0 = 1, grid_param = seq(0.1, 0.9, length.out = 20),
-                          sigma = NULL, mu0 = NULL) {
+covariance_ll <- function(curves, grid_bandwidth, grid_smooth,
+                          k0, params) {
 
-  m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
-
-  if(is.null(sigma)) {
-    sigma <- estimate_sigma(curves)
-  }
-
-  if(is.null(mu0)) {
-    mu0 <- estimate_density(curves)
-  }
 
   prod_ <- smooth_curves_covariance(curves, grid_bandwidth,
-                                    grid_smooth, k0,
-                                    grid_param, sigma, mu0)
+                                    grid_smooth, k0, params)
 
 
   wt_cond <- purrr::map(curves, ~abs(outer(.x$t, grid_smooth, "-"))) |>
@@ -405,4 +369,6 @@ covariance_ll <- function(curves, grid_bandwidth =
          moment2_prod = prod_$bw$params$moments$EXtXs2,
          WN = prod_$bw$params$WN)
 }
+
+
 

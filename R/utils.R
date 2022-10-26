@@ -1,3 +1,39 @@
+#' Generate exponential grid for optimisation
+#'
+#' @param from Starting point of grid.
+#' @param to End point of grid.
+#' @param length.out Number of points in the grid.
+#' @returns A vector containing grid values.
+#' @examples
+#' lseq(from = 1, to = 100, length.out = 51)
+#' @export
+
+lseq <- function (from = 1, to = 100, length.out = 51) {
+  exp(seq(log(from), log(to), length.out = length.out))
+}
+
+#' @export
+epa_kernel <- function(y) {
+  3/4 * (1 - y^2) * (abs(y) <= 1)
+}
+
+
+#' @export
+epa_shrinkage <- function(u){
+  ifelse(abs(u) <= 1, 0.75*(1 - u**2), .Machine$double.eps)
+}
+
+
+
+#' @export
+bertin_kernel <- function(x, beta){
+  ((1 + beta)/ (2 * beta))  * (1 - abs(x)^beta) * (abs(x) <= 1)
+}
+
+
+
+
+
 MSE_1D <- function(mu, mu_estim) {
   sum((mu - mu_estim)^2) / length(mu)
 }
@@ -225,6 +261,15 @@ eigen_kneip <- function(curves, grid_smooth, nvalues) {
   efunctions <- eelements$vectors[, 1:nvalues] * sqrt(grid_smooth)
   list(evalues = evalues, efunctions = efunctions)
 }
+
+#' @export
+normalise_sign <- function(efunction, efunction_true) {
+  sapply(seq(ncol(efunction)), function(j) {
+    c(sign(t(efunction[, j]) %*% efunction_true[, j])) * efunction[, j]
+  })
+}
+
+
 
 
 

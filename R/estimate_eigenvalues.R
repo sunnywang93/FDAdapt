@@ -27,13 +27,11 @@
 #' @export
 
 estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
-                                       grid_param, sigma, mu0,
-                                       nvalues)
+                                       nvalues, params)
   {
 
-  #first use gkp covariance to estimate "pointwise" eigenfunctions
-  cov_gkp <- covariance_ll(curves, grid_bandwidth, grid_smooth, k0,
-                           grid_param, sigma, mu0)
+  cov_gkp <- covariance_norm(curves, grid_bandwidth, grid_smooth,
+                             k0, params)
 
   #obtain the normalised eigenvalues
   eigen_elements <- normalise_eigen(cov_gkp$cov, nvalues)
@@ -79,6 +77,8 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
     }, simplify = "array")
   }, simplify = "array")
 
+  variance_s[is.nan(variance_s)] <- 0
+
   variance_t <- aperm(variance_s, c(2, 1, 3, 4))
   #perform integration iteratively
   variance_s_int <- apply(variance_s,
@@ -95,8 +95,10 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   rm(variance_t)
 
-  variance_term <- max(sigma**2) * variance_s_int +
-    max(sigma**2) * variance_t_int
+  m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
+
+  variance_term <- (max(sigma**2) * variance_s_int +
+    max(sigma**2) * variance_t_int)
 
   regularising_term <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
@@ -111,7 +113,15 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   min_h_index <- apply(risk, MARGIN = 1, which.min)
 
-  sapply(min_h_index, function(id) grid_bandwidth[id])
+  h_star <- sapply(min_h_index, function(id) grid_bandwidth[id])
+
+  M_avg <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
+
+  N_effective <- mean(cov_gkp$WN[,, min_h_index]) * M_avg
+
+  h_constant <- log(N_effective)**(abs(log(h_star) / log(N_effective)))
+
+  h_star * h_constant
 }
 
 #' Smooth curves with adaptive eigenvalue bandwidth
@@ -147,12 +157,11 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @export
 
 smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
-                                  grid_param, sigma, mu0,
-                                  nvalues)
+                                  nvalues, params)
 {
 
   bw_vector <- estimate_bandwidth_evalues(curves, grid_bandwidth, grid_smooth, k0,
-                                          grid_param, sigma, mu0, nvalues)
+                                          nvalues, params)
 
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
 
@@ -205,7 +214,6 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param nvalues The number of eigenvalues to be kept.
 #' @returns A list containing
 #' * Normalised eigenvalues.
-#' * Normalised eigenfunctions.
 #' * Bandwidth used for smoothing curves.
 #' @examples
 #' evalues_adaptive(curves = curves_list,
@@ -219,27 +227,11 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @export
 
 evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
-                             grid_param, sigma = NULL, mu0 = NULL,
-                             nvalues = 10) {
-
-  m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
-
-  if(is.null(sigma)) {
-    if(m <= 50) {
-      sigma <- estimate_sigma(curves)
-    }
-    else {
-      sigma <- estimate_sigma_recursive(curves)
-    }
-  }
-
-  if(is.null(mu0)) {
-    mu0 <- estimate_density(curves)
-  }
+                             nvalues = 10, params) {
 
   smooth_curves <- smooth_curves_evalues(curves, grid_bandwidth,
-                                         grid_smooth, k0,
-                                         grid_param, sigma, mu0, nvalues)
+                                         grid_smooth, k0, nvalues,
+                                         params)
 
   mu_eigen <- mean_plugin_evalues(curves, smooth_curves$smoothed_curves,
                                   smooth_curves$bw, grid_smooth, k0)
@@ -276,12 +268,7 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
     eelements[[j]]$values[j]
   })
 
-  efunctions <- sapply(seq_along(eelements), function(j) {
-    eelements[[j]]$vectors[, j]
-  })
-
   list(eigenvalues = evalues,
-       eigenfunctions = efunctions,
        bandwidth = smooth_curves$bw)
 }
 
