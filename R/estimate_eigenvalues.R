@@ -97,8 +97,8 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   m <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
 
-  variance_term <- (max(sigma**2) * variance_s_int +
-    max(sigma**2) * variance_t_int)
+  variance_term <- (max(params$sigma**2) * variance_s_int +
+    max(params$sigma**2) * variance_t_int)
 
   regularising_term <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {

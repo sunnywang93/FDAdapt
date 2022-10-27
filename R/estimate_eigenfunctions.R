@@ -116,7 +116,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
 
   variance_constant <- sapply(seq(nfunctions), function(j) {
     1 / sum((evalues_norm[j] - evalues_norm[-j])**2)
-  }) *  max(cov_gkp$constants$sigma**2)
+  }) *  max(params$sigma**2)
 
   variance_term <- sweep(variance_s + variance_t, MARGIN = 2,
                          STATS = variance_constant, FUN = "*")
