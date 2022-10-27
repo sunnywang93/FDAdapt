@@ -205,8 +205,6 @@ estimate_L <- function(smoothed_curves, t_list, H) {
 #' @param params Tibble of parameters, containing
 #' - **$H** Estimated regularity.
 #' - **$L** Estimated Hölder constant.
-#' - **sigma** Estimated noise.
-#' - **mu0** Estimated density of sampling points.
 #' @param grid_smooth Grid of points to smooth curves.
 #' @returns A list, containing
 #' - **$VarXt** Estimated Variance of `Xt`.
@@ -216,13 +214,7 @@ estimate_L <- function(smoothed_curves, t_list, H) {
 #' @export
 estimate_variance_curves <- function(data, params, grid_smooth) {
 
-  sigma <- params$sigma
-
-  mu0 <- params$mu0
-
   m <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-
-  grid_tibble <- params
 
   X_hat <- sapply(data, function(i) lokern::lokerns(x = i$t,
                                                     y = i$x,
@@ -256,5 +248,58 @@ estimate_variance_curves <- function(data, params, grid_smooth) {
   list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2,
        EXtXs2 = EXtXs2)
 }
+
+#' Estimate pointwise noise level of curves using only observed points
+#'
+#' `estimate_sigma` estimates the variance of curves, using only
+#' information from curves.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param grid_param Vector containing the sampling points to estimate
+#' the noise.
+#' @returns Vector with the same length as `grid_param`.
+#' @export
+
+estimate_sigma <- function(data, grid_param = seq(.1, .9, length.out = 20)) {
+  Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
+  delta <- 2 * sqrt(log(Mbar)) / Mbar
+  #diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
+  idx <- data |> purrr::map(~order(.x$t))
+  diffsq <- data |> purrr::map2(idx, ~c(0, diff(.x$x[.y])**2))
+  #indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
+  indic <- purrr::map(data,
+                      ~(abs(outer(.x$t, grid_param, FUN = "-")) <= delta) * 1)
+  sum_diffsq <- purrr::map2(diffsq, indic, ~t(.y) %*% .x)
+  denom <- purrr::map(indic, ~colSums(.x, na.rm = TRUE))
+  sum_diffsq_norm <- purrr::map2(sum_diffsq, denom, ~.x / (2 * .y))
+  modifiedSum <- function(x, y) {
+    replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
+  }
+  c(sqrt(Reduce(modifiedSum, sum_diffsq_norm) / length(sum_diffsq_norm)))
+}
+
+
+#' Estimate minimum density of sample points
+#'
+#' `estimate_density` estimates the minimum density of time points using
+#' the kernel density estimator.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @returns A number.
+#' @export
+
+estimate_density <- function(data) {
+  T_all <- data |> purrr::map(~.x$t) |> unlist() |> sort()
+  min(density(T_all, from = 0.15, to = 0.85)$y)
+}
+
+
+
 
 

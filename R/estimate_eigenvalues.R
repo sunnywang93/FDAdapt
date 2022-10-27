@@ -30,23 +30,23 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
                                        nvalues, params)
   {
 
-  cov_gkp <- covariance_norm(curves, grid_bandwidth, grid_smooth,
+  cov_norm <- covariance_norm(curves, grid_bandwidth, grid_smooth,
                              k0, params)
 
   #obtain the normalised eigenvalues
-  eigen_elements <- normalise_eigen(cov_gkp$cov, nvalues)
+  eigen_elements <- normalise_eigen(cov_norm$cov, nvalues)
 
   #extract normalised eigenvalues
   evalues_norm <- eigen_elements$values
   efunctions_norm <- eigen_elements$vectors
 
   h_alpha <- sapply(grid_bandwidth, function(h) {
-    cov_gkp$constants$L**2 * h**(2*cov_gkp$constants$H)
+    cov_norm$constants$L**2 * h**(2*cov_norm$constants$H)
   })
 
   #G x H matrix for fixed j - column recycling used here
   bias_t <- sapply(seq(nvalues), function(j) {
-    efunctions_norm[, j]**2 * cov_gkp$kernel_int * h_alpha
+    efunctions_norm[, j]**2 * cov_norm$kernel_int * h_alpha
   }, simplify = "array")
 
   #integrate over the grid: output H x J
@@ -56,7 +56,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
 
   bias_s <- sapply(seq(nvalues), function(j) {
-    cov_gkp$moment2 * efunctions_norm[, j]**2
+    cov_norm$moment2 * efunctions_norm[, j]**2
   })
 
   #output: J x 1
@@ -73,7 +73,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
   variance_s <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
       outer(efunctions_norm[, j]**2, efunctions_norm[, j]**2) *
-        cov_gkp$moment2 / cov_gkp$Ngamma_st[,,h]
+        cov_norm$moment2 / cov_norm$Ngamma_st[,,h]
     }, simplify = "array")
   }, simplify = "array")
 
@@ -103,7 +103,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
   regularising_term <- sapply(seq_along(grid_bandwidth), function(h) {
     sapply(seq(nvalues), function(j) {
       outer(efunctions_norm[, j]**2, efunctions_norm[, j]**2) *
-        cov_gkp$moment2_prod * (1 / cov_gkp$WN[,, h] - 1 / length(curves))
+        cov_norm$moment2_prod * (1 / cov_norm$WN[,, h] - 1 / length(curves))
     }, simplify = "array")
   }, simplify = "array") |>
     apply(MARGIN = c(2, 3, 4), function(t) pracma::trapz(grid_smooth, t)) |>
@@ -117,7 +117,7 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   M_avg <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
 
-  N_effective <- mean(cov_gkp$WN[,, min_h_index]) * M_avg
+  N_effective <- mean(cov_norm$WN[,, min_h_index]) * M_avg
 
   h_constant <- log(N_effective)**(abs(log(h_star) / log(N_effective)))
 

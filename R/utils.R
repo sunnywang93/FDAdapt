@@ -32,12 +32,6 @@ bertin_kernel <- function(x, beta){
 
 
 
-
-
-MSE_1D <- function(mu, mu_estim) {
-  sum((mu - mu_estim)^2) / length(mu)
-}
-
 ISE <- function(t, x, y, trimmed = FALSE){
   if (trimmed) {
     cond <- (t > 0.05) & (t < 0.95)
@@ -67,6 +61,7 @@ ISE_2D <- function(t, x, y, trimmed = FALSE) {
   }
 }
 
+#' @export
 list2cai <- function(data){
   seq_along(data) |>
     lapply(function(idx) {
@@ -75,12 +70,14 @@ list2cai <- function(data){
     (\(x) do.call("rbind", x))()
 }
 
+#' @export
 mean_ss <- function(curves, grid){
   curves_ <- list2cai(curves)
   mod <- stats::smooth.spline(curves_$time, curves_$x)
   stats::predict(mod, grid)$y
 }
 
+#' @export
 mean_lll <- function(curves, grid) {
   curves_ <- list2cai(curves)
   L3 <- fdapace::MakeFPCAInputs(
@@ -121,8 +118,6 @@ generate_mean_curve <- function(k_length, grid_t = seq(0, 1, length.out = 101),
 }
 
 
-#add mean curve to each curve
-#input: mu_t on a dense grid
 add_mean_curve <- function(data, mu_t) {
 
   m <- data |> map_dbl(~length(.x$t))
@@ -157,31 +152,7 @@ add_mean_to_true <- function(data, mu_t) {
 }
 
 
-get_means <- function(result_list, n_simu = n_simu) {
-  mu_gkp <- sapply(result_list, function(x) x$mu_gkp$mu_hat)
-  mu_cai <- sapply(result_list, function(x) x$mu_cai)
-  mu_zhang <- sapply(result_list, function(x) x$mu_zhang)
-
-  MSE_gkp <- sapply(seq(n_simu), function(id) {
-    MSE_1D(mu_Ti, mu_gkp[, id])
-  })
-
-  MSE_cai <- sapply(seq(n_simu), function(id) {
-    MSE_1D(mu_Ti, mu_cai[, id])
-  })
-
-  MSE_zhang <- sapply(seq(n_simu), function(id) {
-    MSE_1D(mu_Ti, mu_zhang[, id])
-  })
-
-  #ratios of integrated squared error
-  ratio_cai <- MSE_gkp / MSE_cai
-  ratio_zhang <- MSE_gkp / MSE_zhang
-
-  cbind(ratio_cai, ratio_zhang)
-}
-
-
+#' @export
 covariance_lll <- function(curves, grid, bandwidth = 0.1){
   if (!inherits(curves, 'list')) curves <- checkData(curves)
   curves_ <- list2cai(curves)
@@ -195,12 +166,7 @@ covariance_lll <- function(curves, grid, bandwidth = 0.1){
   )$cov
 }
 
-
-true_cov_pfbm <- function(t, s, H, change_point) {
-  obs <- expand.grid(t = t, s = s)
-  0.5 * (abs(obs$t)^(2*H) + abs(obs$s)^(2*H) - abs(obs$t - obs$s)^(2*H))
-}
-
+#' @export
 normalise_eigen <- function(covariance, nvalues = 10) {
   eelements <- eigen(covariance, symmetric = TRUE)
   evalues <- eelements$values[seq(nvalues)]

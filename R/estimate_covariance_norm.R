@@ -118,7 +118,7 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
                 nrow = length(grid_smooth))
 
   #q2(t|s) = q2(s|t) = q2
-  q2 <- max(sigma**2) * (qq2 + t(qq2))
+  q2 <- max(grid_tibble$sigma**2) * (qq2 + t(qq2))
 
   q2_ts_term <- array(q2, dim = c(length(grid_smooth),
                                   length(grid_smooth),

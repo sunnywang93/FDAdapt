@@ -1,53 +1,3 @@
-#' Estimate pointwise noise level of curves using only observed points
-#'
-#' `estimate_sigma` estimates the variance of curves, using only
-#' information from curves.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @param grid_param Vector containing the sampling points to estimate
-#' the noise.
-#' @returns Vector with the same length as `grid_param`.
-#' @export
-
-estimate_sigma <- function(data, grid_param = seq(.1, .9, length.out = 20)) {
-  Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-  delta <- 2 * sqrt(log(Mbar)) / Mbar
-  #diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
-  idx <- data |> purrr::map(~order(.x$t))
-  diffsq <- data |> purrr::map2(idx, ~c(0, diff(.x$x[.y])**2))
-  #indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
-  indic <- purrr::map(data,
-                      ~(abs(outer(.x$t, grid_param, FUN = "-")) <= delta) * 1)
-  sum_diffsq <- purrr::map2(diffsq, indic, ~t(.y) %*% .x)
-  denom <- purrr::map(indic, ~colSums(.x, na.rm = TRUE))
-  sum_diffsq_norm <- purrr::map2(sum_diffsq, denom, ~.x / (2 * .y))
-  modifiedSum <- function(x, y) {
-    replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
-  }
-  c(sqrt(Reduce(modifiedSum, sum_diffsq_norm) / length(sum_diffsq_norm)))
-}
-
-
-#' Estimate minimum density of sample points
-#'
-#' `estimate_density` estimates the minimum density of time points using
-#' the kernel density estimator.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @returns A number.
-#' @export
-
-estimate_density <- function(data) {
-  T_all <- data |> purrr::map(~.x$t) |> unlist() |> sort()
-  min(density(T_all, from = 0.15, to = 0.85)$y)
-}
-
 #' Performs presmoothing of curves
 #'
 #' `presmoothing` performs presmoothing on irregularly sampled curves,
@@ -72,7 +22,6 @@ estimate_density <- function(data) {
 #' - **$x** Smoothed data points.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
-#' @export
 
 presmoothing <- function (data,
                           t0_list = seq(.1, .9, l = 20),
@@ -128,7 +77,6 @@ presmoothing <- function (data,
 #' sampling points of presmoothed curves.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
-#' @export
 
 estimate_H0 <- function(presmoothed_data){
   presmoothed_data |> purrr::map_dbl(function(d) {
@@ -158,7 +106,6 @@ estimate_H0 <- function(presmoothed_data){
 #' sampling points of presmoothed curves.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
-#' @export
 
 estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 
@@ -192,7 +139,6 @@ estimate_L0 <- function(presmoothed_data, H0_list, t0_list, M) {
 #' @returns A vector containing `H(t)` evaluated at `t0_list`.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
-#' @export
 
 
 presmoothing_splines <- function(data, t0_list = seq(.1, .9, l = 20)) {
@@ -249,7 +195,6 @@ presmoothing_splines <- function(data, t0_list = seq(.1, .9, l = 20)) {
 #' @return Numeric for `H(t0)`.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2022) - Learning the
 #' smoothness of noisy curves with application to online curve estimation.
-#' @export
 
 
 estimate_H0_order <- function(data, t0 = 0, k0 = 2, sigma) {
@@ -420,7 +365,6 @@ estimate_L0_order_list <- function(data, t0_list, k0_list, H0_list, sigma) {
 #' @returns Tibble with estimated parameters as columns.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
-#' @export
 
 estimate_holder_const <- function(data,
                                   grid_estim = seq(0.2, 0.8, length.out = 20),
@@ -481,15 +425,9 @@ estimate_holder_const <- function(data,
 #' - **$VarXt** Estimated Variance of `Xt`.
 #' - **$VarXtXs** Estimated Variance of `XtXs`.
 #' - **$EXt2** Estimated second moment of `Xt`.
-estimate_variance_curves <- function(data, params, grid_smooth,
-                                     sigma = NULL, mu0 = NULL) {
-  if(is.null(sigma)) {
-    sigma <- estimate_sigma(data)
-  }
+estimate_variance_curves_old <- function(data, params, grid_smooth,
+                                         sigma, mu0) {
 
-  if(is.null(mu0)) {
-    mu0 <- estimate_density(data)
-  }
 
   m <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
 
@@ -557,7 +495,6 @@ estimate_variance_curves <- function(data, params, grid_smooth,
 #' @returns A scalar or vector, depending on the inputs.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
-#' @export
 
 bertin_bandwidth <- function(sigma, mu0, init_b, init_L, m) {
   aa <- (init_b + 1) / 2 * init_b**2 * mu0
@@ -584,7 +521,6 @@ bertin_bandwidth <- function(sigma, mu0, init_b, init_L, m) {
 #' and columns the time points where smoothing is performed.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
-#' @export
 
 bertin_smoother <- function(data, grid, bandwidth) {
 
