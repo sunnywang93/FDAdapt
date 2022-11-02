@@ -10,6 +10,14 @@
 #' - **$t** Sampling points.
 #' - **$x** Observed Points
 #' @param grid_param Grid of points to estimate parameters.
+#' @param weighted TRUE/FALSE, specifying if a weighted approach should be used,
+#' which gives more weights to curves with more observed point around a fixed
+#' `t`.
+#' @param cv TRUE/FALSE, specifying whether cross validation should be used
+#' on a learning set. If FALSE, uses an iterative plug-in local bandwidth
+#' approach instead.
+#' @param n_sample Integer. Specifies the number of curves to be used
+#' to learn the cross-validation bandwidth.
 #' @returns A list with two elements:
 #' - **$params** Tibble of parameters.
 #' - **$smoothed_curves** Smoothed_curves.
@@ -17,7 +25,8 @@
 #' estimation of irregular mean and covariance functions.
 #' @export
 
-estimate_holder_quantities <- function(curves, grid_param) {
+estimate_holder_quantities <- function(curves, grid_param, weighted,
+                                       cv, n_sample = 20) {
 
   sigma <- estimate_sigma(curves, grid_param)
   #replace with np density estimator
@@ -25,7 +34,8 @@ estimate_holder_quantities <- function(curves, grid_param) {
 
   m <- mean(purrr::map_dbl(curves, ~length(.x$t)))
 
-  delta <- min(log(m)**(-1.1) / 2, 0.1)
+  #delta <- min(log(m)**(-1.1) / 2, 0.1)
+  delta <- log(m)**(-1.1) / 4
 
   t2_list <- grid_param
   t1_list <- grid_param - delta
@@ -33,22 +43,94 @@ estimate_holder_quantities <- function(curves, grid_param) {
 
   t_list <- rbind(t1_list, t2_list, t3_list)
 
-  smoothed_curves_list <- locpoly_smooth(curves, t_list)
-  smoothed_curves <- smoothed_curves_list$presmoothed
-  H0 <- estimate_H(smoothed_curves)
-  L0 <- estimate_L(smoothed_curves, t_list, H0)
+  if(cv) {
+    smoothed_curves_list <- cv_smooth(curves, t_list, n_sample)
+  } else{
+    smoothed_curves_list <- locpoly_smooth(curves, t_list)
+  }
+
+  if(weighted) {
+    counter <- sapply(curves, function(i) {
+      rowSums((abs(outer(t2_list, i$t, FUN = "-")) <= delta) * 1)
+    })
+    counter_norm <- t(apply(counter, MARGIN = 1,
+                            function(x) x / sum(x)))
+    H0 <- estimate_H(smoothed_curves_list$presmoothed, counter_norm)
+  } else {
+    H0 <- estimate_H(smoothed_curves_list$presmoothed)
+  }
+
+  L0 <- estimate_L(smoothed_curves_list$presmoothed, t_list, H0)
 
   tibble::tibble(t = grid_param, H = H0, L = L0,
                  sigma = sigma, mu0 = mu0)
 }
 
 
-#' Performs presmoothing for the purpose of parameter estimation
+#' Performs presmoothing for the purpose of parameter estimation with
+#' least squares cross-validation bandwidth
 #'
-#' `locpoly_smooth` epresmooths raw curves, for the purpose of
-#' parameter estimation. Cross-validation is first done to determine
-#' a local bandwidth, before a correction is performed based on thereotical
-#' grounding.
+#' `cv_smooth` presmooths raw curves, for the purpose of
+#' parameter estimation. Uses least squares cross-validation to determine
+#' a global bandwidth on a learning set, and using the median of learned
+#' bandwidths to smooth across all curves.
+#'
+#' @param curves A list containing the raw data points with two entries:
+#' - **$t** Sampling points.
+#' - **$x** Observed Points
+#' @param grid Grid of points to estimate parameters. Must be a matrix, with
+#' the rows representing the 3 time points, `t1, t2, t3`, and the columns
+#' are the points on the estimation grid.
+#' @param n_sample Number of curves to use as learning set to learn the
+#' cross-validated bandwidth. Uses uniform sampling without replacement.
+#' @returns An `G x N x 3` array, where `G` is the number of points on the
+#' the grid and `N` is the number of curves.
+#' @export
+
+cv_smooth <- function(curves, grid, n_sample) {
+  sorted_grid <- sort(as.vector(grid), index.return = TRUE)
+
+  #randomly sample n_sample points for CV
+  learning_idx <- sample(x = seq_along(curves),
+                         size = n_sample)
+
+  sampled_curves <- curves[learning_idx]
+
+  cv_bw <- purrr::map_dbl(sampled_curves,
+                          ~npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
+    median()
+
+  presmoothed <- lapply(curves, function(i) {
+    obs_vec <- i$x
+    t_vec <- i$t
+    predict(npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+            newdata = data.frame(t_vec = sorted_grid$x))
+  })
+
+  presmoothed_t1 <- sapply(presmoothed,
+                           function(x) x[sorted_grid$ix %in%
+                                         seq(1, length(sorted_grid$x), by = 3)])
+
+  presmoothed_t2 <- sapply(presmoothed,
+                           function(x) x[sorted_grid$ix %in%
+                                         seq(2, length(sorted_grid$x), by = 3)])
+
+  presmoothed_t3 <- sapply(presmoothed,
+                           function(x) x[sorted_grid$ix %in%
+                                         seq(3, length(sorted_grid$x), by = 3)])
+
+  list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
+                                  presmoothed_t3, along = 3),
+       bandwidth = cv_bw)
+}
+
+
+#' Performs presmoothing for the purpose of parameter estimation with
+#' iterative plug-in bandwidth
+#'
+#' `locpoly_smooth` presmooths raw curves, for the purpose of
+#' parameter estimation. Uses an iterative local plug-in bandwidth approach
+#' for bandwidth selection. See references for more details.
 #'
 #' @param curves A list containing the raw data points with two entries:
 #' - **$t** Sampling points.
@@ -58,23 +140,22 @@ estimate_holder_quantities <- function(curves, grid_param) {
 #' are the points on the estimation grid.
 #' @returns An `G x N x 3` array, where `G` is the number of points on the
 #' the grid and `N` is the number of curves.
-#' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
-#' estimation of irregular mean and covariance functions.
+#' @references Hermann E. (1997) - Local Bandwidth Choice in Kernel
+#' Regression Estimation.
 #' @export
 
-#grid: t1, t2, t3 as a matrix
 locpoly_smooth <- function(curves, grid) {
 
   sorted_grid <- sort(as.vector(grid), index.return = TRUE)
 
   bandwidth_list <- purrr::map(curves,
-                               ~lokern::lokerns(x = .x$t, y = .x$x,
-                                        x.out = sorted_grid$x)$bandwidth)
+                               ~(lokern::lokerns(x = .x$t, y = .x$x,
+                                 x.out = sorted_grid$x)$bandwidth))
 
-  bandwidth_list_bounded <- purrr::map(bandwidth_list,
-                                       ~ifelse(.x <= 0.01, 0.01, .x))
+  # bandwidth_list <- purrr::map(bandwidth_list,
+  #                              ~ifelse(.x <= 0.01, 0.01, .x))
 
-  bandwidth_t2 <- purrr::map(bandwidth_list_bounded,
+  bandwidth_t2 <- purrr::map(bandwidth_list,
                              ~.x[sorted_grid$ix %in%
                                    seq(2, length(sorted_grid$x), by = 3)])
 
@@ -87,25 +168,22 @@ locpoly_smooth <- function(curves, grid) {
                     bandwidth = bandwidth_t2_rep[[i]])
   })
 
-
   presmoothed_values <- purrr::map(presmoothed,
                                    ~list(t = .x$x.out,
                                          x = .x$est))
 
   presmoothed_t1 <- sapply(presmoothed_values,
                            function(x) x$x[sorted_grid$ix %in%
-                                             seq(1, length(sorted_grid$x),
-                                                 by = 3)])
+                                           seq(1, length(sorted_grid$x), by = 3)])
+
 
   presmoothed_t2 <- sapply(presmoothed_values,
                            function(x) x$x[sorted_grid$ix %in%
-                                             seq(2, length(sorted_grid$x),
-                                                 by = 3)])
+                                           seq(2, length(sorted_grid$x), by = 3)])
 
   presmoothed_t3 <- sapply(presmoothed_values,
                            function(x) x$x[sorted_grid$ix %in%
-                                             seq(3, length(sorted_grid$x),
-                                                 by = 3)])
+                                           seq(3, length(sorted_grid$x), by = 3)])
 
   list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
                                   presmoothed_t3, along = 3),
@@ -114,7 +192,6 @@ locpoly_smooth <- function(curves, grid) {
 
 
 epa_smoother <- function(curves, grid_points, bandwidth) {
-
   weights <- lapply(curves, function(i) {
     epa_kernel(outer(i$t, grid_points, FUN = "-") / bandwidth)
   })
@@ -148,17 +225,16 @@ estimate_theta <- function(curves_u, curves_v) {
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
-estimate_H <- function(smoothed_curves) {
-  # theta1 <- apply(smoothed_curves, MARGIN = 3,
-  #                 function(x) estimate_theta(x[1, ], x[3, ]))
-  #
-  # theta2 <- apply(smoothed_curves, MARGIN = 3,
-  #                 function(x) estimate_theta(x[1, ], x[2, ]))
-  #
-  # H <- (log(theta1) - log(theta2)) / 2*log(2)
-  # pmin(pmax(H, 0.1), 1)
-  theta1 <- rowMeans((smoothed_curves[,,1] - smoothed_curves[,,3])**2)
-  theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
+estimate_H <- function(smoothed_curves, weights) {
+  if(missing(weights)) {
+    theta1 <- rowMeans((smoothed_curves[,,1] - smoothed_curves[,,3])**2)
+    theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
+  } else {
+    theta1 <- rowMeans((weights * smoothed_curves[,,1] -
+                          weights * smoothed_curves[,,3])**2)
+    theta2 <- rowMeans((weights * smoothed_curves[,,2] -
+                          weights * smoothed_curves[,,3])**2)
+  }
   H <- (log(theta1) - log(theta2)) / 2 * log(2)
   pmin(pmax(H, 0.1), 1)
 }
@@ -183,14 +259,16 @@ estimate_H <- function(smoothed_curves) {
 #' estimation of irregular mean and covariance functions.
 #' @export
 estimate_L <- function(smoothed_curves, t_list, H) {
-
   theta1 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
   theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,1])**2)
+  theta3 <- rowMeans((smoothed_curves[,,3] - smoothed_curves[,,1])**2)
 
   L1 <- theta1 / abs(t_list[3, ] - t_list[2, ])**(2 * H)
   L2 <- theta2 / abs(t_list[2, ] - t_list[1, ])**(2 * H)
+  L3 <- theta3 / abs(t_list[3, ] - t_list[1, ])**(2 * H)
 
-  sqrt((L1 + L2) / 2)
+  #sqrt((L1 + L2) / 2)
+  sqrt(L3)
 }
 
 #' Estimate moments of curves for downstream analysis
