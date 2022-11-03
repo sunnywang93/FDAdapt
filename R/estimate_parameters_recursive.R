@@ -97,13 +97,13 @@ cv_smooth <- function(curves, grid, n_sample) {
   sampled_curves <- curves[learning_idx]
 
   cv_bw <- purrr::map_dbl(sampled_curves,
-                          ~npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
+                          ~np::npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
     median()
 
   presmoothed <- lapply(curves, function(i) {
     obs_vec <- i$x
     t_vec <- i$t
-    predict(npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+    predict(np::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
             newdata = data.frame(t_vec = sorted_grid$x))
   })
 

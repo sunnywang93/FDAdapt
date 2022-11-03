@@ -4,7 +4,7 @@
 \alias{estimate_H}
 \title{Estimated the local regularity based on presmoothing}
 \usage{
-estimate_H(smoothed_curves)
+estimate_H(smoothed_curves, weights)
 }
 \arguments{
 \item{smoothed_curves}{An array with dimensions \verb{G x N x 3}, where

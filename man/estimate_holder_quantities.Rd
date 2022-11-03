@@ -4,7 +4,7 @@
 \alias{estimate_holder_quantities}
 \title{Performs estimation of parameters}
 \usage{
-estimate_holder_quantities(curves, grid_param)
+estimate_holder_quantities(curves, grid_param, weighted, cv, n_sample = 20)
 }
 \arguments{
 \item{curves}{A list containing the raw data points with two entries:
@@ -14,6 +14,17 @@ estimate_holder_quantities(curves, grid_param)
 }}
 
 \item{grid_param}{Grid of points to estimate parameters.}
+
+\item{weighted}{TRUE/FALSE, specifying if a weighted approach should be used,
+which gives more weights to curves with more observed point around a fixed
+\code{t}.}
+
+\item{cv}{TRUE/FALSE, specifying whether cross validation should be used
+on a learning set. If FALSE, uses an iterative plug-in local bandwidth
+approach instead.}
+
+\item{n_sample}{Integer. Specifies the number of curves to be used
+to learn the cross-validation bandwidth.}
 }
 \value{
 A list with two elements:
