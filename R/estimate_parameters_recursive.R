@@ -35,7 +35,7 @@ estimate_holder_quantities <- function(curves, grid_param, weighted,
   m <- mean(purrr::map_dbl(curves, ~length(.x$t)))
 
   #delta <- min(log(m)**(-1.1) / 2, 0.1)
-  delta <- log(m)**(-1.1) / 4
+  delta <- exp(-log(m)**(1/3)) / 4
 
   t2_list <- grid_param
   t1_list <- grid_param - delta
@@ -97,13 +97,13 @@ cv_smooth <- function(curves, grid, n_sample) {
   sampled_curves <- curves[learning_idx]
 
   cv_bw <- purrr::map_dbl(sampled_curves,
-                          ~np::npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
+                          ~np:::npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
     median()
 
   presmoothed <- lapply(curves, function(i) {
     obs_vec <- i$x
     t_vec <- i$t
-    predict(np::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+    predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
             newdata = data.frame(t_vec = sorted_grid$x))
   })
 

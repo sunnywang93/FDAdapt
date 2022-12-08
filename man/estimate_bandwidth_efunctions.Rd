@@ -37,7 +37,6 @@ estimation.}
 \item \strong{$L} Estimated Hölder constants.
 \item \strong{$sigma} Estimated noise.
 \item \strong{$mu} Estimated density of time points.
-estimates it.
 }}
 }
 \value{

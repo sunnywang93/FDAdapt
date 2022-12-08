@@ -23,12 +23,14 @@ estimation.}
 
 \item{nvalues}{The number of eigenvalues to be kept.}
 
-\item{grid_param}{Grid of points to estimate parameters.}
-
-\item{sigma}{Noise level, if known. Defaults to NULL, which estimates it.}
-
-\item{mu0}{Density lower bound for time points. Defaults to NULL, which
-estimates it.}
+\item{params}{A tibble, containing the following parameters:
+\itemize{
+\item \strong{$t$} Sampling points.
+\item \strong{$H} Estimated Hölder exponents.
+\item \strong{$L} Estimated Hölder constants.
+\item \strong{$sigma} Estimated noise.
+\item \strong{$mu0} Estimated density of time points.
+}}
 }
 \value{
 A list containing

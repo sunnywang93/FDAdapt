@@ -21,12 +21,14 @@ must be a list with two entries:
 \item{k0}{Minimum number of points curves must possess to be used in
 estimation.}
 
-\item{grid_param}{Grid of points to estimate parameters.}
-
-\item{sigma}{Noise level, if known. Defaults to NULL, which estimates it.}
-
-\item{mu0}{Density lower bound for time points. Defaults to NULL, which
-estimates it.}
+\item{params}{A tibble, containing the following parameters:
+\itemize{
+\item \strong{$t$} Sampling points.
+\item \strong{$H} Estimated Hölder exponents.
+\item \strong{$L} Estimated Hölder constants.
+\item \strong{$sigma} Estimated noise.
+\item \strong{$mu0} Estimated density of time points.
+}}
 }
 \value{
 A list containing
@@ -44,14 +46,6 @@ each curve at \code{t|s}.
 \description{
 \code{covariance_norm} estimates the covariance function using curves that
 have been smoothed using an adaptive global bandwidth.
-}
-\examples{
-covariance_ll(curves = curves_list,
-grid_bandwidth = seq(0, 1, length.out = 151),
-grid_smooth = seq(0, 1, length.out = 101),
-k0 = 1,
-grid_param = seq(0, 1, length.out = 20),
-sigma = 0.1, mu0 = 1, nvalues = 10)
 }
 \references{
 Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive

@@ -30,25 +30,20 @@ estimation.}
 
 \item{nvalues}{The number of eigenvalues to be kept.}
 
-\item{grid_param}{Grid of points to estimate parameters.}
-
-\item{sigma}{Noise level of curves.}
-
-\item{mu0}{Density lower bound for time points.}
+\item{params}{A tibble, containing the following parameters:
+\itemize{
+\item \strong{$t$} Sampling points.
+\item \strong{$H} Estimated Hölder exponents.
+\item \strong{$L} Estimated Hölder constants.
+\item \strong{$sigma} Estimated noise.
+\item \strong{$mu0} Estimated density of time points.
+}}
 }
 \value{
-A vector of length nvalues containing the adaptive bandwidth
+A vector of length \code{nvalues} containing the adaptive bandwidth.
 for each eigenvalue.
 }
 \description{
 \code{estimate_bandwidth_evalues} returns a vector of bandwidths for each
 eigenvalue, used for smoothing curves and is optimal for eigenvalue estimation.
-}
-\examples{
-estimate_bandwidth_evalues(curves = curves_list,
-grid_bandwidth = seq(0, 1, length.out = 151),
-grid_smooth = seq(0, 1, length.out = 101),
-k0 = 1,
-grid_param = seq(0, 1, length.out = 20),
-sigma = 0.1, mu0 = 1, nvalues = 10)
 }

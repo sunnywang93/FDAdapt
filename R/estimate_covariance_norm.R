@@ -12,10 +12,12 @@
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
+#' @param param_tibble A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
 #' @returns A list with two elements, containing
 #' * A global bandwidth.
 #' * A list, containing
@@ -31,10 +33,10 @@
 
 estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
                                                grid_smooth, k0,
-                                               grid_tibble)
+                                               param_tibble)
 {
 
-  cst_kernel <- 1.5 * (1 / (1 + 2 * grid_tibble$H) - 1 / (3 + 2 * grid_tibble$H))
+  cst_kernel <- 1.5 * (1 / (1 + 2 * param_tibble$H) - 1 / (3 + 2 * param_tibble$H))
 
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
   M_length_cum <- cumsum(M_length)
@@ -75,6 +77,7 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
 
   Wm_t <- outer(T_diff, grid_bandwidth, FUN = "/") |>
     epa_kernel()
+
   #N x G x H
   max_Wm_t <- sapply(Mi_vec, function(Mi) {
     Wm_t[Mi,,] |> apply(c(2,3), FUN = max, na.rm = TRUE)
@@ -99,12 +102,12 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
 
   Ngamma_st <- aperm(Ngamma_ts, c(2, 1, 3))
 
-  var_ <- estimate_variance_curves(data = curves, params = grid_tibble,
+  var_ <- estimate_variance_curves(data = curves, params = param_tibble,
                                    grid_smooth = grid_smooth)
 
-  q1_ts <- outer(cst_kernel * grid_tibble$L**2, 2 * var_$EXt2)
+  q1_ts <- outer(cst_kernel * param_tibble$L**2, 2 * var_$EXt2)
 
-  h_alpha_t <- t(outer(grid_bandwidth, 2 * grid_tibble$H, FUN = "^"))
+  h_alpha_t <- t(outer(grid_bandwidth, 2 * param_tibble$H, FUN = "^"))
 
   ones <- rep(1, length(grid_smooth))
 
@@ -118,7 +121,7 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
                 nrow = length(grid_smooth))
 
   #q2(t|s) = q2(s|t) = q2
-  q2 <- max(grid_tibble$sigma**2) * (qq2 + t(qq2))
+  q2 <- max(param_tibble$sigma**2) * (qq2 + t(qq2))
 
   q2_ts_term <- array(q2, dim = c(length(grid_smooth),
                                   length(grid_smooth),
@@ -156,7 +159,7 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
 
   list(bandwidth = h_constant * h_opt,
        params = list(moments = var_,
-                     constants = grid_tibble,
+                     constants = param_tibble,
                      kernel_int = cst_kernel,
                      Ngamma_ts = Ngamma_ts,
                      Ngamma_st = Ngamma_st,
@@ -179,10 +182,13 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
+#' @param param_tibble A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
+#'
 #' @returns A list with two elements, containing
 #'   - **$smoothed_product** List containing the smoothed product `XtXs`.
 #'   - **$smoothed_curves** List containing the smoothed curves `Xt`.
@@ -196,27 +202,21 @@ estimate_bandwidth_covariance_norm <- function(curves, grid_bandwidth,
 #'     - **$N_gamma_st** Harmonic mean of the number of points used for
 #'   smoothing each curve at `(s|t)`.
 #'     - **$WN** Total number of curves selected for estimation.
-#' @examples
-#' smooth_curves_covariance(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
+#'   - **$nw_weights** Nadaraya-Watson weights at optimal bandwidth value.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 
 
 smooth_curves_covariance_norm <- function(curves, grid_bandwidth,
-                                          grid_smooth, k0, grid_tibble)
+                                          grid_smooth, k0, param_tibble)
 {
 
   bandwidth_list <- estimate_bandwidth_covariance_norm(curves,
                                                        grid_bandwidth,
                                                        grid_smooth,
                                                        k0,
-                                                       grid_tibble)
+                                                       param_tibble)
 
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
 
@@ -238,7 +238,8 @@ smooth_curves_covariance_norm <- function(curves, grid_bandwidth,
   list(smoothed_product = XtXs,
        smoothed_curves = Xt,
        bandwidth = bandwidth_list$bandwidth,
-       params = bandwidth_list$params)
+       params = bandwidth_list$params,
+       nw_weights = Wm)
 }
 
 #' Estimate covariance function using adaptive global bandwidth
@@ -254,10 +255,12 @@ smooth_curves_covariance_norm <- function(curves, grid_bandwidth,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
 #' @returns A list containing
 #' - **$cov** Estimated covariance function.
 #' - **$bandwidth** Global bandwidth used to smooth each curve.
@@ -267,13 +270,6 @@ smooth_curves_covariance_norm <- function(curves, grid_bandwidth,
 #' each curve at `t|s`.
 #' - **$Ngamma_st** Transpose of `Ngamma_ts`.
 #' - **$WN** Total number of points selected for estimation.
-#' @examples
-#' covariance_ll(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
@@ -293,10 +289,10 @@ covariance_norm <- function(curves, grid_bandwidth, grid_smooth,
                                                   y = c(x[1], x, x[nrow(var_interp)]),
                                                   xi = grid_smooth))
 
-  grid_tibble <- tibble::as_tibble(cbind(t = grid_smooth, interp_mat))
+  param_tibble <- tibble::as_tibble(cbind(t = grid_smooth, interp_mat))
 
   prod_ <- smooth_curves_covariance_norm(curves, grid_bandwidth,
-                                         grid_smooth, k0, grid_tibble)
+                                         grid_smooth, k0, param_tibble)
 
   indic <- purrr::map(curves,
                    ~(abs(outer(.x$t, grid_smooth, "-")) <= prod_$bandwidth) * 1)
@@ -322,33 +318,16 @@ covariance_norm <- function(curves, grid_bandwidth, grid_smooth,
   Gamma <- gamma - mu
 
   #final step: replace diagonal band
-  for (t in 1:ncol(Gamma)) {
-    s <- 1
-    current_cov <- Gamma[s, t - s + 1]
-    while (s <= (t - s + 1)) {
-      if (abs(grid_smooth[s] - grid_smooth[t - s + 1]) >
-          prod_$bandwidth) {
-        current_cov <- Gamma[s, t - s + 1]
-      } else {
-        Gamma[s, t - s + 1] <- current_cov
-      }
-      s <- s + 1
-    }
-  }
-  #loop over lower anti-diagonal
-  for (s in 1:nrow(Gamma)) {
-    t <- ncol(Gamma)
-    current_cov <- Gamma[ncol(Gamma) + s - t, t]
-    while (t >= (ncol(Gamma) + s - t)) {
-      if (abs(grid_smooth[ncol(Gamma) + s - t] - grid_smooth[t]) >
-          prod_$bandwidth) {
-        current_cov <- Gamma[ncol(Gamma) + s - t, t]
-      } else {
-        Gamma[ncol(Gamma) + s - t, t] <- current_cov
-      }
-      t <- t - 1
-    }
-  }
+  Wm_ts <- purrr::map(prod_$nw_weights, ~t(.x) %*% .x)
+
+  diag_bias_sum <- purrr::map2(wtws, Wm_ts, ~.x * .y) |>
+    (\(x) Reduce('+', x))() / WN
+
+
+  sigma_ts <- outer(prod_$params$constants$sigma, prod_$params$constants$sigma)
+
+  Gamma <- Gamma - ((1 - 1 / WN) * (sigma_ts * diag_bias_sum))
+
   list(cov = Gamma,
        bandwidth = prod_$bandwidth,
        constants = prod_$params$constants,

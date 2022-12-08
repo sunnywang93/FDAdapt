@@ -19,7 +19,6 @@
 #' - **$L** Estimated Hölder constants.
 #' - **$sigma** Estimated noise.
 #' - **$mu** Estimated density of time points.
-#' estimates it.
 #' @returns A vector of length nfunctions containing the adaptive bandwidth
 #' for each eigenfunction.
 #' @export
@@ -28,17 +27,18 @@
 estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
                                           k0, nfunctions, params)
   {
-  cov_gkp <- covariance_norm(curves, grid_bandwidth, grid_smooth,
+
+  cov_norm <- covariance_norm(curves, grid_bandwidth, grid_smooth,
                              k0, params)
 
-  eigen_elements <- normalise_eigen(cov_gkp$cov, nfunctions)
+  eigen_elements <- normalise_eigen(cov_norm$cov, nfunctions)
 
   evalues_norm <- eigen_elements$values
   efunctions_norm <- eigen_elements$vectors
 
   #G x H matrix
-  h_alpha_t <- t(outer(grid_bandwidth, 2 * cov_gkp$constants$H, FUN = "^")) *
-    (cov_gkp$constants$L**2 * cov_gkp$kernel_int)
+  h_alpha_t <- t(outer(grid_bandwidth, 2 * cov_norm$constants$H, FUN = "^")) *
+    (cov_norm$constants$L**2 * cov_norm$kernel_int)
 
   #G x H x J array before integrating - column recycling used
   bias_tt <- sapply(seq(nfunctions), function(j) {
@@ -48,7 +48,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
           FUN = function(t) pracma::trapz(grid_smooth, t))
 
   bias_ts <- sapply(seq(nfunctions), function(j) {
-    rowSums(efunctions_norm[, -j]**2) * cov_gkp$moment2
+    rowSums(efunctions_norm[, -j]**2) * cov_norm$moment2
   }) |> apply(MARGIN = 2, function(s) pracma::trapz(grid_smooth, s))
 
   bias_t <- sweep(bias_tt, MARGIN = 2, STATS = bias_ts, FUN = "*")
@@ -60,7 +60,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
     apply(MARGIN = c(2, 3), function(s) pracma::trapz(grid_smooth, s))
 
   bias_st <- sapply(seq(nfunctions), function(j) {
-    efunctions_norm[, j]**2 * cov_gkp$moment2
+    efunctions_norm[, j]**2 * cov_norm$moment2
   }) |>
     apply(MARGIN = 2, function(t) pracma::trapz(grid_smooth, t))
 
@@ -74,7 +74,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
                      STATS = bias_constant, FUN = "*")
 
   variance_tt <- sapply(seq(nfunctions), function(j) {
-    efunctions_norm[, j]**2 * cov_gkp$moment2
+    efunctions_norm[, j]**2 * cov_norm$moment2
   })
 
   variance_ts <- sapply(seq(nfunctions), function(j) {
@@ -87,7 +87,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
 
   variance_t <- sapply(seq(nfunctions), function(j) {
     sapply(seq_along(grid_bandwidth), function(h) {
-      variance_t_num[,,j] / cov_gkp$Ngamma_ts[,,h]
+      variance_t_num[,,j] / cov_norm$Ngamma_ts[,,h]
     }, simplify = "array")
   }, simplify = "array")
 
@@ -102,7 +102,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
 
   variance_s <- sapply(seq(nfunctions), function(j) {
     sapply(seq_along(grid_bandwidth), function(h) {
-      variance_s_num[,,j] / cov_gkp$Ngamma_st[,,h]
+      variance_s_num[,,j] / cov_norm$Ngamma_st[,,h]
     }, simplify = "array")
   }, simplify = "array")
 
@@ -122,7 +122,7 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
                          STATS = variance_constant, FUN = "*")
 
   regularise_st <- sapply(seq_along(grid_bandwidth), function(h) {
-    cov_gkp$moment2_prod * (1 / cov_gkp$WN[,,h]) - (1 / length(curves))
+    cov_norm$moment2_prod * (1 / cov_norm$WN[,,h]) - (1 / length(curves))
   }, simplify = "array")
 
   regularise_ts <- sapply(seq(nfunctions), function(j) {
@@ -152,11 +152,12 @@ estimate_bandwidth_efunctions <- function(curves, grid_bandwidth, grid_smooth,
 
   M_avg <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
 
-  N_effective <- mean(cov_gkp$WN[,, min_h_index]) * M_avg
+  N_effective <- mean(cov_norm$WN[,, min_h_index]) * M_avg
 
   h_constant <- log(N_effective)**(abs(log(h_star) / log(N_effective)))
 
-  h_star * h_constant
+  list(bandwidth = h_star * h_constant,
+       constants = cov_norm$constants)
 }
 
 #' Smooth curves with adaptive eigenfunction bandwidth
@@ -193,7 +194,7 @@ smooth_curves_efunctions <- function(curves, grid_bandwidth,
                                      grid_smooth, k0,
                                      nfunctions, params)
 {
-  bandwidth <- estimate_bandwidth_efunctions(curves, grid_bandwidth,
+  bandwidth_list <- estimate_bandwidth_efunctions(curves, grid_bandwidth,
                                              grid_smooth, k0,
                                              nfunctions, params)
 
@@ -201,7 +202,7 @@ smooth_curves_efunctions <- function(curves, grid_bandwidth,
 
   #dim Mi x G x J for each curve i
   Wm_num <- purrr::map(curves, ~outer(.x$t, grid_smooth, FUN = "-")) |>
-    purrr::map(~outer(.x, bandwidth, FUN = "/")) |>
+    purrr::map(~outer(.x, bandwidth_list$bandwidth, FUN = "/")) |>
     purrr::map(~epa_kernel(.x))
 
   Wm_denom <- purrr::map(Wm_num, ~colSums(.x, na.rm = TRUE))
@@ -221,7 +222,17 @@ smooth_curves_efunctions <- function(curves, grid_bandwidth,
       w[,,j] %*% y$x
     })
   })
-  list(smoothed_curves = Xt, bandwidth = bandwidth)
+
+  Wm_ts <- lapply(Wm, function(i) {
+    sapply(seq(nfunctions), function(j) {
+      i[,,j] %*% t(i[,,j])
+    }, simplify = "array")
+  })
+
+  list(smoothed_curves = Xt,
+       bandwidth = bandwidth_list$bandwidth,
+       nw_weights_ts = Wm_ts,
+       constants = bandwidth_list$constants)
 }
 
 
@@ -293,8 +304,21 @@ efunctions_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   emp_cov <- weighted_cov / WN
 
+  #final step:replace diagonal band
+  diag_bias_sum <- purrr::map2(mu_eigen$wt, smooth_curves$nw_weights_ts,
+                               ~sapply(seq(nfunctions), function(j)
+                                 outer(.x[, j], .x[, j]) * .y[,,j],
+                                 simplify = "array")) |>
+    (\(x) Reduce('+', x))() / WN
+
+  sigma_ts <- outer(smooth_curves$constants$sigma,
+                    smooth_curves$constants$sigma)
+
+  emp_cov_corr <- emp_cov -
+    ((1 - 1 / WN) * (diag_bias_sum * replicate(nfunctions, sigma_ts)))
+
   eelements <- lapply(seq(nfunctions), function(j) {
-    normalise_eigen(emp_cov[,,j], nfunctions)
+    normalise_eigen(emp_cov_corr[,,j], nfunctions)
   })
 
   efunctions <- sapply(seq_along(eelements), function(j) {

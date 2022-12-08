@@ -236,6 +236,45 @@ normalise_sign <- function(efunction, efunction_true) {
 }
 
 
+#' Corrects the diagonal band of covariance function
+#'
+#'
+#' @param mat_input Matrix, representing the covariance function.
+#' @param h Bandwidth used to smooth curve.
+#' @returns Matrix, with corrected diagonal band.
+#' @references Patilea V., Wang S. (2022+) - Adaptive Functional
+#' Principal Components Analysis
+#' @export
+
+correct_diag <- function(mat_input, h) {
+
+  K <- floor(1 * h * ncol(mat_input))
+  mat <- (lower.tri(mat_input, diag = TRUE) * 1) * mat_input
+  for(g in 2:ncol(mat)) {
+    current <- mat[max(K + 1, g - 1) , 1]
+    for(i in (g-1):floor((g + 1) / 2)) {
+      j <- g - i
+      if(abs(i - j) > K) {
+        current <- mat[i, j]
+      } else {
+        mat[i, j] <- current
+      }
+    }
+  }
+
+  for(g in (2 * ncol(mat)):(ncol(mat) + 2)) {
+    current <- mat[ncol(mat) , min(ncol(mat) - K, g - ncol(mat))]
+    for(i in ncol(mat):floor((g + 1)/ 2)) {
+      j <- g - i
+      if(abs(i - j) > K) {
+        current <- mat[i, j]
+      } else {
+        mat[i, j] <- current
+      }
+    }
+  }
+  mat + t(mat) - diag(diag(mat))
+}
 
 
 

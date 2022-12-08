@@ -11,19 +11,15 @@
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level of curves.
-#' @param mu0 Density lower bound for time points.
 #' @param nvalues The number of eigenvalues to be kept.
-#' @returns A vector of length nvalues containing the adaptive bandwidth
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
+#' @returns A vector of length `nvalues` containing the adaptive bandwidth.
 #' for each eigenvalue.
-#' @examples
-#' estimate_bandwidth_evalues(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
 #' @export
 
 estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
@@ -38,6 +34,8 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   #extract normalised eigenvalues
   evalues_norm <- eigen_elements$values
+
+  #possibility to use adaptive eigenfunctions instead?
   efunctions_norm <- eigen_elements$vectors
 
   h_alpha <- sapply(grid_bandwidth, function(h) {
@@ -121,7 +119,8 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   h_constant <- log(N_effective)**(abs(log(h_star) / log(N_effective)))
 
-  h_star * h_constant
+  list(bandwidth = h_star * h_constant,
+       constants = cov_norm$constants)
 }
 
 #' Smooth curves with adaptive eigenvalue bandwidth
@@ -138,30 +137,30 @@ estimate_bandwidth_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level of curves.
-#' @param mu0 Density lower bound for time points.
 #' @param nvalues The number of eigenvalues to be kept.
-#' @returns A list of two elements, containing
-#' * A list of curves, with
-#'   - $t Sampling points.
-#'   - $x Observed points.
-#' * A vector of bandwidths used to smooth each curve.
-#' @examples
-#' smooth_curves_evalues(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
+#' @returns A list, containing
+#' - **$smoothed_curves** Smoothed Curves.
+#' - **$bw_vector** Vector of bandwidths, with length `nvalues`.
+#' - **$nw_weights_ts** Nadaraya-Watson weights at each `(t,s)`, with the
+#' optimal bandwidth values.
+#' - **$constants** Tibble of constants.
 #' @export
 
 smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
                                   nvalues, params)
 {
 
-  bw_vector <- estimate_bandwidth_evalues(curves, grid_bandwidth, grid_smooth, k0,
-                                          nvalues, params)
+  bandwidth_list <- estimate_bandwidth_evalues(curves, grid_bandwidth,
+                                               grid_smooth, k0,
+                                               nvalues, params)
+
+  bw_vector <- bandwidth_list$bandwidth
 
   M_length <- curves |> purrr::map_dbl(~(length(.x$t)))
 
@@ -187,7 +186,17 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
       w[,,j] %*% y$x
     })
   })
-  list(smoothed_curves = Xt, bw = bw_vector)
+
+  Wm_ts <- lapply(Wm, function(i) {
+    sapply(seq(nvalues), function(j) {
+      i[,,j] %*% t(i[,,j])
+    }, simplify = "array")
+  })
+
+  list(smoothed_curves = Xt,
+       bw = bw_vector,
+       nw_weights_ts = Wm_ts,
+       constants = bandwidth_list$constants)
 }
 
 
@@ -207,21 +216,16 @@ smooth_curves_evalues <- function(curves, grid_bandwidth, grid_smooth, k0,
 #' @param grid_smooth Grid of points to smooth curves.
 #' @param k0 Minimum number of points curves must possess to be used in
 #' estimation.
-#' @param grid_param Grid of points to estimate parameters.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL, which
-#' estimates it.
 #' @param nvalues The number of eigenvalues to be kept.
+#' @param params A tibble, containing the following parameters:
+#' - **$t$** Sampling points.
+#' - **$H** Estimated Hölder exponents.
+#' - **$L** Estimated Hölder constants.
+#' - **$sigma** Estimated noise.
+#' - **$mu0** Estimated density of time points.
 #' @returns A list containing
-#' * Normalised eigenvalues.
-#' * Bandwidth used for smoothing curves.
-#' @examples
-#' evalues_adaptive(curves = curves_list,
-#' grid_bandwidth = seq(0, 1, length.out = 151),
-#' grid_smooth = seq(0, 1, length.out = 101),
-#' k0 = 1,
-#' grid_param = seq(0, 1, length.out = 20),
-#' sigma = 0.1, mu0 = 1, nvalues = 10)
+#' - **$eigenvalues** Normalised eigenvalues.
+#' - **$bandwidth** Vector of bandwidths used for smoothing curves.
 #' @references Patilea V., Wang S. (2022+) - Adaptive Functional
 #' Principal Components Analysis
 #' @export
@@ -235,7 +239,6 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   mu_eigen <- mean_plugin_evalues(curves, smooth_curves$smoothed_curves,
                                   smooth_curves$bw, grid_smooth, k0)
-
 
   centered_curves <- lapply(smooth_curves$smoothed_curves, function(i) {
     i - mu_eigen$mu
@@ -260,8 +263,22 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
 
   emp_cov <- weighted_cov / WN
 
+  #replace diagonal band
+  diag_bias_sum <- purrr::map2(mu_eigen$wt, smooth_curves$nw_weights_ts,
+                               ~sapply(seq(nvalues), function(j)
+                                 outer(.x[, j], .x[, j]) * .y[,,j],
+                                 simplify = "array")) |>
+    (\(x) Reduce('+', x))() / WN
+
+  sigma_ts <- outer(smooth_curves$constants$sigma,
+                    smooth_curves$constants$sigma)
+
+  emp_cov_corr <- emp_cov -
+    ((1 - 1 / WN) * (diag_bias_sum * replicate(nvalues, sigma_ts)))
+
+
   eelements <- lapply(seq(nvalues), function(j) {
-    normalise_eigen(emp_cov[,,j], nvalues)
+    normalise_eigen(emp_cov_corr[,,j], nvalues)
   })
 
   evalues <- sapply(seq_along(eelements), function(j) {
@@ -271,6 +288,11 @@ evalues_adaptive <- function(curves, grid_bandwidth, grid_smooth, k0,
   list(eigenvalues = evalues,
        bandwidth = smooth_curves$bw)
 }
+
+
+
+
+
 
 
 
