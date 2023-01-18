@@ -378,6 +378,45 @@ estimate_density <- function(data) {
 }
 
 
+#' Estimate the variance of raw data curves, which do not require
+#' smoothing.
+#'
+#' `estimate_variance_irreg` estimates the variance using only the
+#' raw data points, possibly irregularly sampled, without pre-smoothing
+#' the curves.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param grid_estim Vector of sampling points to estimate the variance.
+#' @returns Vector, comprising the estimated variance on the grid of
+#' sampling points.
+#' @export
+estimate_variance_irreg <- function(data, grid_estim) {
+  # Find the closest point Tmi to the grid t
+  idx_grid <- lapply(data, function(x) {
+    sapply(grid_estim, function(t) which.min(abs(t - x$t)))
+  })
+
+  # Compute the second moment based on extracted points
+  second_mom <- purrr::map2(data, idx_grid, ~.x$x[.y]**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Compute the squared mean
+  mean_squared <- purrr::map2(data, idx_grid, ~.x$x[.y]) |>
+    (\(x) (Reduce('+', x) / length(x))**2)()
+
+  # Compute variance of noisy observed curves
+  variance_y <- second_mom - mean_squared
+
+  # Estimate variance of noise
+  variance_noise <- estimate_sigma(data, grid_param = grid_estim)**2
+
+  #Calculate the variance of true curves
+  variance_y - variance_noise
+  # Pointless to correct for spacings - 1 / log(N) is pretty large
+}
 
 
 
