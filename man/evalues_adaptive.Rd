@@ -35,8 +35,8 @@ estimation.}
 \value{
 A list containing
 \itemize{
-\item Normalised eigenvalues.
-\item Bandwidth used for smoothing curves.
+\item \strong{$eigenvalues} Normalised eigenvalues.
+\item \strong{$bandwidth} Vector of bandwidths used for smoothing curves.
 }
 }
 \description{
@@ -45,14 +45,6 @@ Curves can be irregularly sampled, possess heterogenous
 degrees of smoothness and be relatively sparse (but should have
 at least 20 points per curve). Uses the "smooth first, then estimate"
 approach.
-}
-\examples{
-evalues_adaptive(curves = curves_list,
-grid_bandwidth = seq(0, 1, length.out = 151),
-grid_smooth = seq(0, 1, length.out = 101),
-k0 = 1,
-grid_param = seq(0, 1, length.out = 20),
-sigma = 0.1, mu0 = 1, nvalues = 10)
 }
 \references{
 Patilea V., Wang S. (2022+) - Adaptive Functional

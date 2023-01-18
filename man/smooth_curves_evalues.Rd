@@ -33,26 +33,17 @@ estimation.}
 }}
 }
 \value{
-A list of two elements, containing
+A list, containing
 \itemize{
-\item A list of curves, with
-\itemize{
-\item $t Sampling points.
-\item $x Observed points.
-}
-\item A vector of bandwidths used to smooth each curve.
+\item \strong{$smoothed_curves} Smoothed Curves.
+\item \strong{$bw_vector} Vector of bandwidths, with length \code{nvalues}.
+\item \strong{$nw_weights_ts} Nadaraya-Watson weights at each \verb{(t,s)}, with the
+optimal bandwidth values.
+\item \strong{$constants} Tibble of constants.
 }
 }
 \description{
 \code{smooth_curves_evalues} smooths irregularly sampled curves onto a specified
 grid to approximate densely observed curves in functional data. Used
 primarily to estimate eigenvalues downstream.
-}
-\examples{
-smooth_curves_evalues(curves = curves_list,
-grid_bandwidth = seq(0, 1, length.out = 151),
-grid_smooth = seq(0, 1, length.out = 101),
-k0 = 1,
-grid_param = seq(0, 1, length.out = 20),
-sigma = 0.1, mu0 = 1, nvalues = 10)
 }

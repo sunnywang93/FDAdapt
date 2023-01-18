@@ -53,9 +53,8 @@ smoothing each curve at \code{(t|s)}.
 \item \strong{$N_gamma_st} Harmonic mean of the number of points used for
 smoothing each curve at \code{(s|t)}.
 \item \strong{$WN} Total number of curves selected for estimation.
-\item \strong{$Wm_ts} Nadaraya-Watson weights at optimal bandwidth value for each
-pair \verb{(t,s)}.
 }
+\item \strong{$nw_weights} Nadaraya-Watson weights at optimal bandwidth value.
 }
 }
 \description{
