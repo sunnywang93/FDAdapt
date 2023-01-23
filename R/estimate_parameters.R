@@ -1,70 +1,3 @@
-#' Performs presmoothing of curves
-#'
-#' `presmoothing` performs presmoothing on irregularly sampled curves,
-#' for the purpose of estimating parameters such as Hölder constants.
-#' Performed using a modified Nadaraya-Watson estimator, with bandwidth
-#' detailed in the references. A lower and upper bound on the bandwidths
-#' are imposed in order to avoid degenerate cases.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @param t0_list Vector of sampling points which presmoothing
-#'  is performed.
-#' @param init_b Initialised Hölder exponent.
-#' @param init_L Initialised Hölder constant.
-#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
-#' @param mu0 Density lower bound for time points. Defaults to NULL,
-#'  which estimates it.
-#' @returns A list, containing
-#' - **$t_list** Sample points used for presmoothing.
-#' - **$x** Smoothed data points.
-#' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
-#' nonparametric regression with random design.
-
-presmoothing <- function (data,
-                          t0_list = seq(.1, .9, l = 20),
-                          init_b = 1,
-                          init_L = 1,
-                          sigma = NULL,
-                          mu0 = NULL,
-                          k0_list = 2)
-{
-  m <- data |> purrr::map_dbl(~ length(.x$t)) |> mean()
-
-  delta <- min(log(m)^(-2.5), 0.2)
-  t1_list <- t0_list - delta / 2
-  t3_list <- t0_list + delta / 2
-
-  if(is.null(sigma)) {
-    sigma <- estimate_sigma(data)
-  }
-  if(is.null(mu0)) {
-    mu0 <- estimate_density(data)
-  }
-
-  interval_length <- purrr::map_dbl(data, ~max(.x$t) - min(.x$t)) |> max()
-  bandwidth_min <- interval_length * 0.15
-
-  # H0_order <- estimate_H0_order_list(data, t0_list = t0_list,
-  #                                    k0_list = k0_list, sigma = sigma)
-
-  # bandwidth <- bertin_bandwidth(sigma, mu0, init_b = H0_order, init_L, m) |>
-  #   mean()
-
-  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m)|>
-    pmin(bandwidth_min)
-
-  t_list <- rbind(t1_list, t0_list, t3_list)
-
-  theta <- lapply(seq(ncol(t_list)), function(t_col) {
-    bertin_smoother(data, t_list[, t_col], bandwidth)
-  })
-
-  purrr::map(1:ncol(t_list), ~list(t_list = t_list[, .x],
-                                   x = theta[[.x]]))
-}
 
 #' Performs estimation of Hölder exponent
 #'
@@ -480,6 +413,64 @@ estimate_variance_curves_old <- function(data, params, grid_smooth,
        EXtXs2 = EXtXs2)
 }
 
+#' Performs presmoothing of curves
+#'
+#' `presmoothing` performs presmoothing on irregularly sampled curves,
+#' for the purpose of estimating parameters such as Hölder constants.
+#' Performed using a modified Nadaraya-Watson estimator, with bandwidth
+#' detailed in the references. A lower and upper bound on the bandwidths
+#' are imposed in order to avoid degenerate cases.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param t0_list Vector of sampling points which presmoothing
+#'  is performed.
+#' @param init_b Initialised Hölder exponent.
+#' @param init_L Initialised Hölder constant.
+#' @param sigma Noise level, if known. Defaults to NULL, which estimates it.
+#' @param mu0 Density lower bound for time points. Defaults to NULL,
+#'  which estimates it.
+#' @returns A list, with the following elements:
+#'  - **$presmoothed**: An 3D array of dimension G x N x 3, where G is the number of
+#' `t2` points, N is the number of curves, and the 3rd dimension is for each
+#' of the `t1`, `t2` and `t3` time points respectively.
+#'  - **$t_list**: Matrix of time points, with the rows being the `t1`, `t2`, `t3`
+#'  points nad the columns are points on the estimation grid.
+#' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
+#' nonparametric regression with random design.
+#' @export
+
+presmoothing <- function (data,
+                          t0_list = seq(.1, .9, l = 20),
+                          init_b = 1,
+                          init_L = 1,
+                          sigma = NULL,
+                          mu0 = NULL)
+{
+  m <- data |> purrr::map_dbl(~ length(.x$t)) |> mean()
+
+  delta <- exp(-log(m)**(1/3)) / 2
+  t1_list <- t0_list - delta / 2
+  t3_list <- t0_list + delta / 2
+  t_list <- rbind(t1_list, t0_list, t3_list)
+  sorted_tlist <- sort(as.vector(t_list), index.return = TRUE)
+
+  if(is.null(sigma)) {
+    sigma <- estimate_sigma(data, grid_param = sorted_tlist$x)
+  }
+  if(is.null(mu0)) {
+    mu0 <- estimate_density(data)
+  }
+
+  bandwidth <- bertin_bandwidth(sigma, mu0, init_b, init_L, m)
+
+  list(presmoothed = bertin_smoother(data, sorted_tlist, bandwidth, beta = init_b),
+       t_list = t_list)
+}
+
+
 #' Calculates bandwidth for smoothing
 #'
 #' `bertin_bandwidth` calculates the bandwidth used for downstream smoothing.
@@ -495,11 +486,12 @@ estimate_variance_curves_old <- function(data, params, grid_smooth,
 #' @returns A scalar or vector, depending on the inputs.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
+#' @export
 
 bertin_bandwidth <- function(sigma, mu0, init_b, init_L, m) {
-  aa <- (init_b + 1) / 2 * init_b**2 * mu0
+  aa <- (init_b + 1) / (2 * init_b**2 * mu0)
   c <- (sigma**(2*init_b) * init_L * aa**init_b)**(1 / (2*init_b + 1))
-  psi_m <- (1 / m)**(init_b / (2 * init_b + 1))
+  psi_m <- (log(m) / m)**(init_b / (2 * init_b + 1))
   (c * psi_m / init_L)**(1 / init_b)
 }
 
@@ -513,32 +505,43 @@ bertin_bandwidth <- function(sigma, mu0, init_b, init_L, m) {
 #' must be a list with two entries:
 #'  * $t Sampling points.
 #'  * $x Observed points.
-#' @param grid Vector of sampling points which smoothing
-#'  is performed.
+#' @param grid List, consisting of the following elements:
+#'  * $x Sorted grid on which to smooth curves.
+#'  * $ix Indexes of the sorted grid build from the original vector of grid
+#'  points.
 #' @param bandwidth Bandwidth used to smooth curves, usually
 #'  calculated from `bertin_bandwidth`.
-#' @returns A matrix, with the rows representing curves
-#' and columns the time points where smoothing is performed.
+#' @param beta Initialised regularity.
+#' @returns An 3D array of dimension G x N x 3, where G is the number of
+#' `t2` points, N is the number of curves, and the 3rd dimension is for each
+#' of the `t1`, `t2` and `t3` time points respectively.
 #' @references Bertin L, (2004) - Minimax exact constant in sup-norm for
 #' nonparametric regression with random design.
+#' @export
 
-bertin_smoother <- function(data, grid, bandwidth) {
+bertin_smoother <- function(data, grid, bandwidth, beta) {
 
-  theta_num <- sapply(data, function(i) {
-      (outer(i$t, grid, FUN = "-") / bandwidth) |>
-        bertin_kernel(bandwidth) |>
-        (\(x) (t(x) %*% i$x) / (length(i$t) * bandwidth))()
-    }) |> t()
+  theta_num <- lapply(data, function(i) {
+    sweep(outer(i$t, grid$x, FUN = "-"), MARGIN = 2, STATS = bandwidth,
+          FUN = "/") |> bertin_kernel(beta = beta)
+  })
 
-  theta_denom <- sapply(data, function(i) {
-      (outer(i$t, grid, FUN = "-") / bandwidth) |>
-        bertin_kernel(bandwidth) |> colSums() |>
-        (\(x) x / (length(i$t) * bandwidth))()
-    }) |> t()
+  theta_denom <- purrr::map(theta_num, ~colSums(.x, na.rm = TRUE))
+  theta <- purrr::map2(theta_num, theta_denom, ~sweep(.x, 2, .y, FUN = "/")) |>
+    (\(x) rapply(x, f = function(x) ifelse(is.nan(x), 0, x), how = "replace"))()
 
-  theta <- theta_num / theta_denom
-  theta[is.nan(theta)] <- 0
-  theta
+  theta_y <- purrr::map2(theta, data, ~t(.x) %*% .y$x)
+
+  theta_t1 <- sapply(theta_y,
+                     function(x) x[grid$ix %in% seq(1, length(grid$ix), by = 3)])
+
+  theta_t2 <- sapply(theta_y,
+                     function(x) x[grid$ix %in% seq(2, length(grid$ix), by = 3)])
+
+  theta_t3 <- sapply(theta_y,
+                     function(x) x[grid$ix %in% seq(3, length(grid$ix), by = 3)])
+
+  abind::abind(theta_t1, theta_t2, theta_t3, along = 3)
 }
 
 

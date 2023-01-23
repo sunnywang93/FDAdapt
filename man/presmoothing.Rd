@@ -10,8 +10,7 @@ presmoothing(
   init_b = 1,
   init_L = 1,
   sigma = NULL,
-  mu0 = NULL,
-  k0_list = 2
+  mu0 = NULL
 )
 }
 \arguments{
@@ -35,10 +34,13 @@ is performed.}
 which estimates it.}
 }
 \value{
-A list, containing
+A list, with the following elements:
 \itemize{
-\item \strong{$t_list} Sample points used for presmoothing.
-\item \strong{$x} Smoothed data points.
+\item \strong{$presmoothed}: An 3D array of dimension G x N x 3, where G is the number of
+\code{t2} points, N is the number of curves, and the 3rd dimension is for each
+of the \code{t1}, \code{t2} and \code{t3} time points respectively.
+\item \strong{$t_list}: Matrix of time points, with the rows being the \code{t1}, \code{t2}, \code{t3}
+points nad the columns are points on the estimation grid.
 }
 }
 \description{

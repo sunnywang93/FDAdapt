@@ -35,7 +35,7 @@ estimate_holder_quantities <- function(curves, grid_param, weighted,
   m <- mean(purrr::map_dbl(curves, ~length(.x$t)))
 
   #delta <- min(log(m)**(-1.1) / 2, 0.1)
-  delta <- exp(-log(m)**(1/3)) / 4
+  delta <- exp(-log(m)**(1/3)) / 2
 
   t2_list <- grid_param
   t1_list <- grid_param - delta

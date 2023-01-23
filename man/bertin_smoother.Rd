@@ -4,7 +4,7 @@
 \alias{bertin_smoother}
 \title{Smooths curves using modified Nadaraya-Watson smoother}
 \usage{
-bertin_smoother(data, grid, bandwidth)
+bertin_smoother(data, grid, bandwidth, beta)
 }
 \arguments{
 \item{data}{List, where each element represents a curve. Each curve
@@ -14,15 +14,22 @@ must be a list with two entries:
 \item $x Observed points.
 }}
 
-\item{grid}{Vector of sampling points which smoothing
-is performed.}
+\item{grid}{List, consisting of the following elements:
+\itemize{
+\item $x Sorted grid on which to smooth curves.
+\item $ix Indexes of the sorted grid build from the original vector of grid
+points.
+}}
 
 \item{bandwidth}{Bandwidth used to smooth curves, usually
 calculated from \code{bertin_bandwidth}.}
+
+\item{beta}{Initialised regularity.}
 }
 \value{
-A matrix, with the rows representing curves
-and columns the time points where smoothing is performed.
+An 3D array of dimension G x N x 3, where G is the number of
+\code{t2} points, N is the number of curves, and the 3rd dimension is for each
+of the \code{t1}, \code{t2} and \code{t3} time points respectively.
 }
 \description{
 \code{bertin_smoother} performs curve smoothing using a kernel, referred to as
