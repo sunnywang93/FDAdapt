@@ -5,7 +5,7 @@
 \title{Performs presmoothing for the purpose of parameter estimation with
 least squares cross-validation bandwidth}
 \usage{
-cv_smooth(curves, grid, n_sample)
+cv_smooth(curves, grid, n_sample, separate, bw_inflate)
 }
 \arguments{
 \item{curves}{A list containing the raw data points with two entries:
@@ -20,10 +20,27 @@ are the points on the estimation grid.}
 
 \item{n_sample}{Number of curves to use as learning set to learn the
 cross-validated bandwidth. Uses uniform sampling without replacement.}
+
+\item{separate}{Boolean, indicating whether to use different curves for
+presmoothing on different pairs of grid points \verb{(t1, t3)} and \verb{(t1, t2)}.}
+
+\item{bw_inflate}{Boolean, indicating whether to inflate the bandwidth learned
+from cross-validation by a constant corresponding log rate.}
 }
 \value{
-An \verb{G x N x 3} array, where \code{G} is the number of points on the
-the grid and \code{N} is the number of curves.
+If \code{separate = TRUE}, a list with two elements:
+\itemize{
+\item \strong{$presmoothed} Array with rows the number of points on the grid, columns
+the number of curves, and the 3rd dimension representing the different pairs
+of grid points.
+\item \strong{$bandwidth} Double, containing the cross-validated bandwidth.
+If \code{separate = FALSE}, a list with two elements:
+\item \strong{$presmoothed} Array with rows the number of points on the grid, columns
+the number of curves, and the 3rd dimension representing the presmoothed
+smoothed at each of the \verb{(t1, t2, t3)} points.
+of grid points.
+\item \strong{$bandwidth} Double, containing the cross-validated bandwidth.
+}
 }
 \description{
 \code{cv_smooth} presmooths raw curves, for the purpose of

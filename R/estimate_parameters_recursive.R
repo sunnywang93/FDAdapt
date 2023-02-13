@@ -18,6 +18,10 @@
 #' approach instead.
 #' @param n_sample Integer. Specifies the number of curves to be used
 #' to learn the cross-validation bandwidth.
+#' @param separate_curves Boolean, indicating whether to use different curves for
+#' presmoothing on different pairs of grid points `(t1, t3)` and `(t1, t2)`.
+#' @param inflate_bw Boolean, indicating whether to inflate the bandwidth learned
+#' from cross-validation by a constant corresponding log rate.
 #' @returns A list with two elements:
 #' - **$params** Tibble of parameters.
 #' - **$smoothed_curves** Smoothed_curves.
@@ -26,7 +30,8 @@
 #' @export
 
 estimate_holder_quantities <- function(curves, grid_param, weighted,
-                                       cv, n_sample = 20) {
+                                       cv, n_sample = 20, separate_curves,
+                                       inflate_bw) {
 
   sigma <- estimate_sigma(curves, grid_param)
   #replace with np density estimator
@@ -38,14 +43,14 @@ estimate_holder_quantities <- function(curves, grid_param, weighted,
   delta <- exp(-log(m)**(1/3)) / 2
 
   t2_list <- grid_param
-  t1_list <- grid_param - delta
-  t3_list <- grid_param + delta
-
+  t1_list <- pmax(grid_param - delta, 0)
+  t3_list <- pmin(grid_param + delta, 1)
   t_list <- rbind(t1_list, t2_list, t3_list)
 
   if(cv) {
-    smoothed_curves_list <- cv_smooth(curves, t_list, n_sample)
-  } else{
+    smoothed_curves_list <- cv_smooth(curves, t_list, n_sample, separate_curves,
+                                      bw_inflate = inflate_bw)
+  } else {
     smoothed_curves_list <- locpoly_smooth(curves, t_list)
   }
 
@@ -53,8 +58,7 @@ estimate_holder_quantities <- function(curves, grid_param, weighted,
     counter <- sapply(curves, function(i) {
       rowSums((abs(outer(t2_list, i$t, FUN = "-")) <= delta) * 1)
     })
-    counter_norm <- t(apply(counter, MARGIN = 1,
-                            function(x) x / sum(x)))
+    counter_norm <- t(apply(counter, MARGIN = 1, function(x) x / sum(x)))
     H0 <- estimate_H(smoothed_curves_list$presmoothed, counter_norm)
   } else {
     H0 <- estimate_H(smoothed_curves_list$presmoothed)
@@ -83,45 +87,103 @@ estimate_holder_quantities <- function(curves, grid_param, weighted,
 #' are the points on the estimation grid.
 #' @param n_sample Number of curves to use as learning set to learn the
 #' cross-validated bandwidth. Uses uniform sampling without replacement.
-#' @returns An `G x N x 3` array, where `G` is the number of points on the
-#' the grid and `N` is the number of curves.
+#' @param separate Boolean, indicating whether to use different curves for
+#' presmoothing on different pairs of grid points `(t1, t3)` and `(t1, t2)`.
+#' @param bw_inflate Boolean, indicating whether to inflate the bandwidth learned
+#' from cross-validation by a constant corresponding log rate.
+#' @returns If `separate = TRUE`, a list with two elements:
+#' - **$presmoothed** Array with rows the number of points on the grid, columns
+#' the number of curves, and the 3rd dimension representing the different pairs
+#' of grid points.
+#' - **$bandwidth** Double, containing the cross-validated bandwidth.
+#' If `separate = FALSE`, a list with two elements:
+#' - **$presmoothed** Array with rows the number of points on the grid, columns
+#' the number of curves, and the 3rd dimension representing the presmoothed
+#' smoothed at each of the `(t1, t2, t3)` points.
+#' of grid points.
+#' - **$bandwidth** Double, containing the cross-validated bandwidth.
 #' @export
 
-cv_smooth <- function(curves, grid, n_sample) {
-  sorted_grid <- sort(as.vector(grid), index.return = TRUE)
+cv_smooth <- function(curves, grid, n_sample, separate, bw_inflate) {
 
-  #randomly sample n_sample points for CV
-  learning_idx <- sample(x = seq_along(curves),
-                         size = n_sample)
+  #Stack matrix of time points and sort curves
+  sorted_grid <- sort(Reduce(c, split(grid, row(grid))), index.return = TRUE)
 
+  # Randomly sample learning curves for cross validation
+  learning_idx <- sample(x = seq_along(curves), size = n_sample)
   sampled_curves <- curves[learning_idx]
 
+  # Extract and use the median bandwidth from the learning set
   cv_bw <- purrr::map_dbl(sampled_curves,
                           ~np:::npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
     median()
 
-  presmoothed <- lapply(curves, function(i) {
-    obs_vec <- i$x
-    t_vec <- i$t
-    predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
-            newdata = data.frame(t_vec = sorted_grid$x))
-  })
+  # Option to inflate bandwidths with "uniform rates"
+  mfrak <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
+  if(bw_inflate) {
+    cv_bw <- log(mfrak)**(abs(log(cv_bw)) / log(mfrak))
+  }
 
-  presmoothed_t1 <- sapply(presmoothed,
-                           function(x) x[sorted_grid$ix %in%
-                                         seq(1, length(sorted_grid$x), by = 3)])
+  # Using different curves to presmooth for t1, t2 and t2, t3
+  if(separate) {
+    # Extract the t1 and t3 points
+    t1t3 <- setdiff(sorted_grid$x, grid[2, ])
+    # Extract the index of t1 points
+    t1_idx <- t1t3 %in% grid[1, ]
+    # Sample size cardinality
+    n_split <- floor(length(curves) / 2)
+    # Presmooth curves at (t1, t3) by using first half of curves
+    presmoothed_t1t3 <- sapply(seq(n_split), function(i) {
+      obs_vec <- curves[[i]]$x
+      t_vec <- curves[[i]]$t
+      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+              newdata = data.frame(t_vec = t1t3))
+    })
+    # Extract the curves at t1 and t3 points
+    presmoothed_t1_first <- presmoothed_t1t3[t1_idx, ]
+    presmoothed_t3 <- presmoothed_t1t3[!t1_idx, ]
+    # Presmooth at (t1, t2) using the second half of curves
+    t1t2 <- setdiff(sorted_grid$x, grid[3, ])
+    t2_idx <- t1t2 %in% grid[2, ]
+    presmoothed_t1t2 <- sapply((n_split + 1):(n_split * 2), function(i) {
+      obs_vec <- curves[[i]]$x
+      t_vec <- curves[[i]]$t
+      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+              newdata = data.frame(t_vec = t1t2))
+    })
+    presmoothed_t2 <- presmoothed_t1t2[t2_idx, ]
+    presmoothed_t1_second <- presmoothed_t1t2[!t2_idx, ]
+    # Bind into array
+    list(presmoothed = abind::abind("presmoothed_t1_first" = presmoothed_t1_first,
+                                    "presmoothed_t3" = presmoothed_t3,
+                                    "presmoothed_t1_second" = presmoothed_t1_second,
+                                    "presmoothed_t2" = presmoothed_t2,
+                                    along = 3),
+         bandwidth = cv_bw)
+  } else {
+    #Presmooth using all curves
+    presmoothed <- lapply(curves, function(i) {
+      obs_vec <- i$x
+      t_vec <- i$t
+      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
+              newdata = data.frame(t_vec = sorted_grid$x))
+    })
+    presmoothed_t1 <- sapply(presmoothed,
+                             function(x) x[sorted_grid$ix %in%
+                                             seq(1, length(sorted_grid$x), by = 3)])
 
-  presmoothed_t2 <- sapply(presmoothed,
-                           function(x) x[sorted_grid$ix %in%
-                                         seq(2, length(sorted_grid$x), by = 3)])
+    presmoothed_t2 <- sapply(presmoothed,
+                             function(x) x[sorted_grid$ix %in%
+                                             seq(2, length(sorted_grid$x), by = 3)])
 
-  presmoothed_t3 <- sapply(presmoothed,
-                           function(x) x[sorted_grid$ix %in%
-                                         seq(3, length(sorted_grid$x), by = 3)])
+    presmoothed_t3 <- sapply(presmoothed,
+                             function(x) x[sorted_grid$ix %in%
+                                             seq(3, length(sorted_grid$x), by = 3)])
 
-  list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
-                                  presmoothed_t3, along = 3),
-       bandwidth = cv_bw)
+    list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
+                                    presmoothed_t3, along = 3),
+         bandwidth = cv_bw)
+  }
 }
 
 
@@ -215,28 +277,54 @@ estimate_theta <- function(curves_u, curves_v) {
 #'
 #' Estimates the local regularity with supplied presmoothed curves.
 #'
-#' @param smoothed_curves An array with dimensions `G x N x 3`, where
-#' the rows are the number of points on the grid used for estimation,
-#' the columns are the curves, and the 3rd dimension represent the 3 time points.
-#' Should use `locpoly_smooth` as an auxiliary function to obtain the proper
-#' inputs.
+#' @param smoothed_curves An array with dimensions `G x N x 3` or `G x N x 4`,
+#' where the rows are the number of points on the grid used for estimation,
+#' the columns are the curves, the 3rd dimension depends on whether different
+#' curves are used for estimation.
+#' Should use either `locpoly_smooth` or `cv_smooth` as an auxiliary function
+#' to obtain the proper inputs.
 #' @returns A vector, whose length is equal to the number of sampling
 #' points the presmoothed curves takes values in.
 #' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
 #' estimation of irregular mean and covariance functions.
 #' @export
 estimate_H <- function(smoothed_curves, weights) {
-  if(missing(weights)) {
-    theta1 <- rowMeans((smoothed_curves[,,1] - smoothed_curves[,,3])**2)
-    theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
+  if(dim(smoothed_curves)[3] == 3) {
+    if(missing(weights)) {
+      theta1 <- rowMeans((smoothed_curves[,,1] - smoothed_curves[,,3])**2)
+      theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
+    } else {
+      theta1 <- rowMeans((weights * smoothed_curves[,,1] -
+                            weights * smoothed_curves[,,3])**2)
+      theta2 <- rowMeans((weights * smoothed_curves[,,2] -
+                            weights * smoothed_curves[,,3])**2)
+    }
+    H <- (log(theta1) - log(theta2)) / 2 * log(2)
+    pmin(pmax(H, 0.1), 1)
   } else {
-    theta1 <- rowMeans((weights * smoothed_curves[,,1] -
-                          weights * smoothed_curves[,,3])**2)
-    theta2 <- rowMeans((weights * smoothed_curves[,,2] -
-                          weights * smoothed_curves[,,3])**2)
+    if(missing(weights)) {
+      theta1 <- rowSums((smoothed_curves[,,"presmoothed_t1_first"] -
+                           smoothed_curves[,,"presmoothed_t3"])**2) /
+        ncol(smoothed_curves[,,"presmoothed_t1_first"])
+
+      theta2 <- rowSums((smoothed_curves[,,"presmoothed_t1_second"] -
+                           smoothed_curves[,,"presmoothed_t2"])**2) /
+        ncol(smoothed_curves[,,"presmoothed_t1_second"])
+    }
+    else {
+      n_split <- floor(ncol(weights) / 2)
+      weights1 <- weights[, 1:n_split]
+      weights2 <- weights[, (n_split + 1):(n_split * 2)]
+      theta1 <- rowSums((weights1 * smoothed_curves[,,"presmoothed_t1_first"] -
+                         weights1 * smoothed_curves[,,"presmoothed_t3"])**2) /
+        ncol(weights1)
+      theta2 <- rowSums((weights2 * smoothed_curves[,,"presmoothed_t1_second"] -
+                         weights2 * smoothed_curves[,,"presmoothed_t2"])**2) /
+        ncol(weights2)
+    }
+    H <- (log(theta1) - log(theta2)) / 2 * log(2)
+    pmin(pmax(H, 0.1), 1)
   }
-  H <- (log(theta1) - log(theta2)) / 2 * log(2)
-  pmin(pmax(H, 0.1), 1)
 }
 
 #' Estimated the local Hölder constant based on presmoothing

@@ -4,7 +4,15 @@
 \alias{estimate_holder_quantities}
 \title{Performs estimation of parameters}
 \usage{
-estimate_holder_quantities(curves, grid_param, weighted, cv, n_sample = 20)
+estimate_holder_quantities(
+  curves,
+  grid_param,
+  weighted,
+  cv,
+  n_sample = 20,
+  separate_curves,
+  inflate_bw
+)
 }
 \arguments{
 \item{curves}{A list containing the raw data points with two entries:
@@ -25,6 +33,12 @@ approach instead.}
 
 \item{n_sample}{Integer. Specifies the number of curves to be used
 to learn the cross-validation bandwidth.}
+
+\item{separate_curves}{Boolean, indicating whether to use different curves for
+presmoothing on different pairs of grid points \verb{(t1, t3)} and \verb{(t1, t2)}.}
+
+\item{inflate_bw}{Boolean, indicating whether to inflate the bandwidth learned
+from cross-validation by a constant corresponding log rate.}
 }
 \value{
 A list with two elements:

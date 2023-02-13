@@ -7,11 +7,12 @@
 estimate_H(smoothed_curves, weights)
 }
 \arguments{
-\item{smoothed_curves}{An array with dimensions \verb{G x N x 3}, where
-the rows are the number of points on the grid used for estimation,
-the columns are the curves, and the 3rd dimension represent the 3 time points.
-Should use \code{locpoly_smooth} as an auxiliary function to obtain the proper
-inputs.}
+\item{smoothed_curves}{An array with dimensions \verb{G x N x 3} or \verb{G x N x 4},
+where the rows are the number of points on the grid used for estimation,
+the columns are the curves, the 3rd dimension depends on whether different
+curves are used for estimation.
+Should use either \code{locpoly_smooth} or \code{cv_smooth} as an auxiliary function
+to obtain the proper inputs.}
 }
 \value{
 A vector, whose length is equal to the number of sampling
