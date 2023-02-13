@@ -1,12 +1,12 @@
 #import dependent scripts
-#source("/Users/swang/Dropbox/funeigen/generation/generation_klutchnikoff.R")
+#source("/Users/swang/Dropbox/FDAdapt/generation/generation_klutchnikoff.R")
 source("/Users/swang/Dropbox/FPCA/simuls/nice_dgp/dgp.R")
 #source("/Users/swang/Dropbox/Mac/Downloads/juin15/codes_val/dgp_old.R")
-# source("/Users/swang/Dropbox/funeigen/R/H_and_L_functions.R")
-# source("/Users/swang/Dropbox/funeigen/R/mean_optimised.R")
-# source("/Users/swang/Dropbox/funeigen/R/cov_optimised.R")
-# source("/Users/swang/Dropbox/funeigen/R/utils.R")
-# source("/Users/swang/Dropbox/funeigen/R/eigenvalues.R")
+# source("/Users/swang/Dropbox/FDAdapt/R/H_and_L_functions.R")
+# source("/Users/swang/Dropbox/FDAdapt/R/mean_optimised.R")
+# source("/Users/swang/Dropbox/FDAdapt/R/cov_optimised.R")
+# source("/Users/swang/Dropbox/FDAdapt/R/utils.R")
+# source("/Users/swang/Dropbox/FDAdapt/R/eigenvalues.R")
 
 library(foreach)
 library(fs)

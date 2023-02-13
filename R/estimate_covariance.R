@@ -357,6 +357,7 @@ covariance_ll <- function(curves, grid_bandwidth, grid_smooth,
       t <- t - 1
     }
   }
+
     list(cov = Gamma,
          bandwidth = prod_$bw$bw_matrix,
          constants = prod_$bw$params$constants,
