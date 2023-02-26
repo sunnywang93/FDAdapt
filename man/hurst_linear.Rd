@@ -4,14 +4,14 @@
 \alias{hurst_linear}
 \title{Generate Hurst function with linear change points}
 \usage{
-hurst_linear(t, h_left = 0.2, h_right = 0.8)
+hurst_linear(t_vec, h_left = 0.2, h_right = 0.8)
 }
 \arguments{
+\item{t_vec}{Vector of sampling points.}
+
 \item{h_left}{First Hurst Index.}
 
 \item{h_right}{Second Hurst Index}
-
-\item{t_vec}{Vector of sampling points.}
 }
 \value{
 A vector of length \code{t_vec} containing the Hurst function.

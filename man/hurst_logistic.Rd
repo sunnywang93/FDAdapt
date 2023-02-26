@@ -5,14 +5,16 @@
 \title{Generate Hurst function with logistic change points}
 \usage{
 hurst_logistic(
-  t,
-  h_left = 0.2,
+  t_vec,
+  h_left = 0.5,
   h_right = 0.8,
-  slope = 30,
+  slope = 15,
   change_point_position = 0.5
 )
 }
 \arguments{
+\item{t_vec}{Vector of sampling points.}
+
 \item{h_left}{First Hurst Index.}
 
 \item{h_right}{Second Hurst Index}
@@ -20,8 +22,6 @@ hurst_logistic(
 \item{slope}{Slope of transition between \code{h_left} and \code{h_right}.}
 
 \item{change_point_position}{Change point position between two Hurst indexes.}
-
-\item{t_vec}{Vector of sampling points.}
 }
 \value{
 A vector of length \code{t_vec} containing the Hurst function.

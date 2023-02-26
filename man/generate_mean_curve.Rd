@@ -4,21 +4,15 @@
 \alias{generate_mean_curve}
 \title{Generate a mean curve.}
 \usage{
-generate_mean_curve(
-  k_length,
-  grid_t = seq(0, 1, length.out = 101),
-  alpha,
-  shift = 0,
-  scale_mu = 1
-)
+generate_mean_curve(grid = seq(0, 1, length.out = 101), K = 60, alpha = 1)
 }
 \arguments{
-\item{alpha}{Parameter controlling the regularity of the mean curve. A higher
-\code{alpha} will produce smoother mean curves.}
-
 \item{grid}{Vector of sampling points to generate the mean curve.}
 
 \item{K}{Number of basis functions to use.}
+
+\item{alpha}{Parameter controlling the regularity of the mean curve. A higher
+\code{alpha} will produce smoother mean curves.}
 }
 \value{
 A list, containing the sampling points and observed points.

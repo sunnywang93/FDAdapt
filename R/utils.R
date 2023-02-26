@@ -89,33 +89,34 @@ mean_lll <- function(curves, grid) {
   )$mu
 }
 
-generate_mean_curve <- function(k_length, grid_t = seq(0, 1, length.out = 101),
-                                alpha, shift = 0, scale_mu = 1) {
-  Z <- runif(k_length, -sqrt(3), sqrt(3))
-  #Z <- rnorm(k_length)
-  xi <- c()
-  # for(i in 1:k_length) {
-  #   xi_k <- (-1)^(i+1)*i^(-alpha)
-  #   xi <- c(xi, xi_k)
-  # }
-  for(i in 1:k_length) {
-    xi_k <- 1/((i - 1/2)^alpha*pi^2)
-    xi <- c(xi, xi_k)
-  }
-  k <- seq(1, k_length, by = 1)
 
-  # mu_kt <- sapply(grid_t, function(t) {
-  #   Z * sqrt(xi) * cos(k * pi * t)
-  # })
-
-  mu_kt <- sapply(grid_t, function(t) {
-    sqrt(2) * Z * sqrt(xi) * sin((k - 0.5) * pi * t)
-  })
-
-
-  mu_t <- scale_mu * colSums(mu_kt) + rep(shift, length(grid))
-  tibble(t = grid_t, mu = mu_t)
-}
+# generate_mean_curve <- function(k_length, grid_t = seq(0, 1, length.out = 101),
+#                                 alpha, shift = 0, scale_mu = 1) {
+#   Z <- runif(k_length, -sqrt(3), sqrt(3))
+#   #Z <- rnorm(k_length)
+#   xi <- c()
+#   # for(i in 1:k_length) {
+#   #   xi_k <- (-1)^(i+1)*i^(-alpha)
+#   #   xi <- c(xi, xi_k)
+#   # }
+#   for(i in 1:k_length) {
+#     xi_k <- 1/((i - 1/2)^alpha*pi^2)
+#     xi <- c(xi, xi_k)
+#   }
+#   k <- seq(1, k_length, by = 1)
+#
+#   # mu_kt <- sapply(grid_t, function(t) {
+#   #   Z * sqrt(xi) * cos(k * pi * t)
+#   # })
+#
+#   mu_kt <- sapply(grid_t, function(t) {
+#     sqrt(2) * Z * sqrt(xi) * sin((k - 0.5) * pi * t)
+#   })
+#
+#
+#   mu_t <- scale_mu * colSums(mu_kt) + rep(shift, length(grid))
+#   tibble(t = grid_t, mu = mu_t)
+# }
 
 
 add_mean_curve <- function(data, mu_t) {
@@ -275,6 +276,21 @@ correct_diag <- function(mat_input, h) {
   }
   mat + t(mat) - diag(diag(mat))
 }
+
+
+#' Powerconsumption data set
+#'
+#' A subset of the powerconsumption dataset from the UCI Repository
+#' @format A tibble with 1358 rows and 1440 columns, with rows representing
+#' the daily curves and columns representing 1 minute samples over a 24-hour
+#' period.
+#' \describe{
+#' Measurements of voltage consumption in one household with a one-minute
+#' sampling rate in a 24 hour period, with data taken over almost 4 years. Days with missing
+#' values were removed from the dataset.
+#' }
+#' @source \url{https://archive.ics.uci.edu/ml/datasets/Individual+household+electric+power+consumption}
+"powerconsumption"
 
 
 

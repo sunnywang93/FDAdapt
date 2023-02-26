@@ -4,16 +4,21 @@
 \alias{hurst_piecewise}
 \title{Generate piecewise Hurst function.}
 \usage{
-hurst_piecewise(t, h_left = 0.2, h_right = 0.8, change_point_position = 0.5)
+hurst_piecewise(
+  t_vec,
+  h_left = 0.2,
+  h_right = 0.8,
+  change_point_position = 0.5
+)
 }
 \arguments{
+\item{t_vec}{Vector of sampling points.}
+
 \item{h_left}{First Hurst Index.}
 
 \item{h_right}{Second Hurst Index}
 
 \item{change_point_position}{Change point position between two Hurst indexes.}
-
-\item{t_vec}{Vector of sampling points.}
 }
 \value{
 A vector of length \code{t_vec} containing the Hurst function.

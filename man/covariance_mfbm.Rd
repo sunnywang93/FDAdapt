@@ -4,7 +4,7 @@
 \alias{covariance_mfbm}
 \title{Generate covariance function associated to multi-fractional brownian motion.}
 \usage{
-covariance_mfbm(points, hurst, ...)
+covariance_mfbm(points, hurst, points_disto, ..., norm = FALSE)
 }
 \arguments{
 \item{points}{Vector of sampling points.}

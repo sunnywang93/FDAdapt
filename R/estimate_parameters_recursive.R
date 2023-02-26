@@ -507,18 +507,6 @@ estimate_variance_irreg <- function(data, grid_estim) {
 }
 
 
-#' Powerconsumption data set
-#'
-#' @name powerconsumption
-#' @title Household power consumption
-#' @format A tibble with 1358 rows and 1440 columns, with rows representing
-#' the daily curves and columns representing 1 minute samples over a 24-hour
-#' period.
-#' @source \url{https://archive.ics.uci.edu/ml/datasets/Individual+household+electric+power+consumption}
-#' @usage powerconsumption
-#' @description Measurements of voltage consumption in one household with a one-minute
-#' sampling rate in a 24 hour period, with data taken over almost 4 years.
-"powerconsumption"
 
 
 

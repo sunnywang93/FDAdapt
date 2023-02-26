@@ -358,3 +358,62 @@ mean_plugin_evalues <- function(curves, smoothed_curves, bandwidth,
 }
 
 
+#' Estimates smoothed mean from a dataset
+#'
+#' Smooths the empirical mean of a dataset using a lasso penalty.
+#' @param df Dataframe, with rows indexing the curves and columns indexing
+#' the time points.
+#' @param k Number of basis functions to be used in fit
+#' @returns A `glmnet` object, which can be used as input to `predict_mean` to
+#' evaluate the smoothed mean on a specified grid.
+#' @export
+
+learn_mean <- function (df, k = 50) {
+  true_mu <- unname(colMeans(df, na.rm = TRUE))
+  m <- ncol(df)
+  t <- seq(0, 1, length.out = m)
+  tfeatures <- matrix(NA, ncol = 2 * k + 1, nrow = length(t))
+  tfeatures[, 1] <- t
+  for (j in 1:k) {
+    tfeatures[, j + 1] <- sqrt(2) * cos(2 * j * pi * t)
+    tfeatures[, 2 * k + 2 - j] <- sqrt(2) * sin(2 * j * pi * t)
+  }
+  glmnet::glmnet(x = tfeatures, y = true_mu, alpha = 1)
+}
+
+
+#' Evaluates the smoothed mean on a grid
+#'
+#' Given a `glmnet` object, for example from the `learn_mean` function,
+#' `predict_mean` computes the function at specific evaluation points.
+#' @param u Vector of sampling points on which the mean which be computed at.
+#' @param model `glmnet` object containing the mean curve.
+#' @param lambda Numeric, representing the value of the regularisation parameter.
+#' @param k Number of basis functions used to fit the data.
+#' @param scale Boolean. If `TRUE`, scales the output by the global mean.
+#' @returns A numeric vector containing the mean curve evaluated on the vector of
+#' grid points `u`.
+#' @export
+predict_mean <- function (u, model, lambda, k = 50, scale) {
+  features <- matrix(NA, ncol = 2 * k + 1, nrow = length(u))
+  features[, 1] <- u
+  for (j in 1:k) {
+    features[, j + 1] <- sqrt(2) * cos(2 * j * pi * u)
+    features[, 2 * k + 2 - j] <- sqrt(2) * sin(2 * j * pi *
+                                                 u)
+  }
+  if(scale) {
+    muhat <- glmnet::predict.glmnet(model, newx = features, s = lambda)[, 1]
+    muhat - mean(muhat)
+  } else {
+    glmnet::predict.glmnet(model, newx = features, s = lambda)[, 1]
+  }
+}
+
+
+
+
+
+
+
+

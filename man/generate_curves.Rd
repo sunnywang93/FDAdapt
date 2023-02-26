@@ -7,10 +7,14 @@
 generate_curves(
   points_list,
   hurst,
+  distortion_model = function(x) x,
+  variance_fun = function(x) 1,
   sigma = 0.1,
-  add_regular_grid_of_size = 0,
-  tau,
-  L = 1
+  regular_grid = seq(0, 1, l = 101),
+  add_one_to_hurst = FALSE,
+  norm_cov = FALSE,
+  L = 1,
+  ...
 )
 }
 \arguments{
@@ -19,11 +23,11 @@ for one curve.}
 
 \item{hurst}{Hurst function.}
 
-\item{sigma}{Noise level of curves.}
-
 \item{distortion_model}{Distortion function \code{A(.)} for the time points.}
 
 \item{variance_fun}{Variance function \code{v(t)^2}.}
+
+\item{sigma}{Noise level of curves.}
 
 \item{regular_grid}{Vector, containing the grid on which the true curves
 will lie.}
