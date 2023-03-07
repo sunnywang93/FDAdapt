@@ -185,8 +185,8 @@ generate_curves <- function(
     regular_grid = seq(0, 1, l = 101),
     add_one_to_hurst = FALSE,
     norm_cov = FALSE,
-    #tau = 0,
     L = 1,
+    novar = FALSE,
     ...
 ) {
     grid <- regular_grid
@@ -203,11 +203,12 @@ generate_curves <- function(
       })
 
     # Create new sample paths with matched variance
-    curves <- lapply(1:length(curves), function(idx) {
-      pp <- sort(c(points_list[[idx]], grid))
-      sqrt(variance_fun(pp)) * distortion_model(pp)**(-hurst(pp)) * curves[[idx]]
+    if(novar == FALSE) {
+      curves <- lapply(1:length(curves), function(idx) {
+        pp <- sort(c(points_list[[idx]], grid))
+        sqrt(variance_fun(pp)) * distortion_model(pp)**(-hurst(pp)) * curves[[idx]]
       })
-
+    }
     # Add random starting point for curves
     # curves <- lapply(curves, function(curve) {
     #   curve + tau * rnorm(1)
