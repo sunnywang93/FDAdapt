@@ -1,469 +1,361 @@
-#' Performs estimation of parameters
+#' Presmoothing with cross-validation
 #'
-#' `estimate_holder_quantities` estimates the parameters used for
-#' downstream analysis, typically for functions such as
-#' `evalues_adaptive`. Cross validation to determine the local
-#'  bandwidth for presmoothing, before a correction is performed
-#'  based on theoretical developments.
+#' Performs presmoothing of functional data, using a Nadaraya-Watson smoother
+#' and a bandwidth learned from cross-validation (cv) on a subset of curves.
+#' Bandwidth used is a q-th quantile of the set of those learned from cv on
+#' each curve. Selected curves are uniformly sampled.
 #'
-#' @param curves A list containing the raw data points with two entries:
-#' - **$t** Sampling points.
-#' - **$x** Observed Points
-#' @param grid_param Grid of points to estimate parameters.
-#' @param weighted TRUE/FALSE, specifying if a weighted approach should be used,
-#' which gives more weights to curves with more observed point around a fixed
-#' `t`.
-#' @param cv TRUE/FALSE, specifying whether cross validation should be used
-#' on a learning set. If FALSE, uses an iterative plug-in local bandwidth
-#' approach instead.
-#' @param n_sample Integer. Specifies the number of curves to be used
-#' to learn the cross-validation bandwidth.
-#' @param separate_curves Boolean, indicating whether to use different curves for
-#' presmoothing on different pairs of grid points `(t1, t3)` and `(t1, t2)`.
-#' @param inflate_bw Boolean, indicating whether to inflate the bandwidth learned
-#' from cross-validation by a constant corresponding log rate.
-#' @returns A list with two elements:
-#' - **$params** Tibble of parameters.
-#' - **$smoothed_curves** Smoothed_curves.
-#' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
-#' estimation of irregular mean and covariance functions.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param N0 Number of curves randomly selected for cross-validation.
+#' @param grid_smooth Grid of t2 points used to presmooth curves.
+#' @param q Quantile of cv bandwidth used to presmooth curves.
+#' @returns A list, containing two elements:
+#' - **$presmoothed_curves** Presmoothed curves.
+#' - **$cv_bandwidth** Bandwidth used.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
 #' @export
 
-estimate_holder_quantities <- function(curves, grid_param, weighted,
-                                       cv, n_sample = 20, separate_curves,
-                                       inflate_bw) {
+presmoothing_FPCA <- function(data, N0, grid_smooth, q) {
 
-  sigma <- estimate_sigma(curves, grid_param)
-  #replace with np density estimator
-  mu0 <- estimate_density(curves)
+  # Randomly sample N0 curves to perform least squares cross-validation
+  cv_idx <- sample(x = seq_along(data), size = N0)
+  # Extract N0 curves for LSCV
+  sampled_data <- data[cv_idx]
+  # Perform LSCV & extract bandwidth
+  lscv_h <- purrr::map_dbl(sampled_data,
+                           ~np::npregbw(.x$x ~ .x$t,
+                                        ckertype = "epanechnikov")$bw)
+  # Select q-th quantile bandwidth
+  h_cv <- unname(quantile(lscv_h, q))
 
-  m <- mean(purrr::map_dbl(curves, ~length(.x$t)))
+  # Smooth each curve with selected bandwidth
+  smoothed_curves <- smooth_curves(data = data, grid = grid_smooth, bandwidth = h_cv)
 
-  #delta <- min(log(m)**(-1.1) / 2, 0.1)
-  delta <- exp(-log(m)**(1/3)) / 2
+  list(presmoothed_curves = purrr::map(smoothed_curves$smoothed_curves,
+                                       ~list(t = grid_smooth, x = .x)),
+       cv_bandwidth = h_cv)
 
-  t2_list <- grid_param
-  t1_list <- pmax(grid_param - delta, 0)
-  t3_list <- pmin(grid_param + delta, 1)
-  t_list <- rbind(t1_list, t2_list, t3_list)
-
-  if(cv) {
-    smoothed_curves_list <- cv_smooth(curves, t_list, n_sample, separate_curves,
-                                      bw_inflate = inflate_bw)
-  } else {
-    smoothed_curves_list <- locpoly_smooth(curves, t_list)
-  }
-
-  if(weighted) {
-    counter <- sapply(curves, function(i) {
-      rowSums((abs(outer(t2_list, i$t, FUN = "-")) <= delta) * 1)
-    })
-    counter_norm <- t(apply(counter, MARGIN = 1, function(x) x / sum(x)))
-    H0 <- estimate_H(smoothed_curves_list$presmoothed, counter_norm)
-  } else {
-    H0 <- estimate_H(smoothed_curves_list$presmoothed)
-  }
-
-  L0 <- estimate_L(smoothed_curves_list$presmoothed, t_list, H0)
-
-  tibble::tibble(t = grid_param, H = H0, L = L0,
-                 sigma = sigma, mu0 = mu0)
 }
 
 
-#' Performs presmoothing for the purpose of parameter estimation with
-#' least squares cross-validation bandwidth
+#' Smooth curves with a given bandwidth
 #'
-#' `cv_smooth` presmooths raw curves, for the purpose of
-#' parameter estimation. Uses least squares cross-validation to determine
-#' a global bandwidth on a learning set, and using the median of learned
-#' bandwidths to smooth across all curves.
+#' Performs smoothing of curves for a given bandwidth using the
+#' Nadaraya-Watson smoother.
 #'
-#' @param curves A list containing the raw data points with two entries:
-#' - **$t** Sampling points.
-#' - **$x** Observed Points
-#' @param grid Grid of points to estimate parameters. Must be a matrix, with
-#' the rows representing the 3 time points, `t1, t2, t3`, and the columns
-#' are the points on the estimation grid.
-#' @param n_sample Number of curves to use as learning set to learn the
-#' cross-validated bandwidth. Uses uniform sampling without replacement.
-#' @param separate Boolean, indicating whether to use different curves for
-#' presmoothing on different pairs of grid points `(t1, t3)` and `(t1, t2)`.
-#' @param bw_inflate Boolean, indicating whether to inflate the bandwidth learned
-#' from cross-validation by a constant corresponding log rate.
-#' @returns If `separate = TRUE`, a list with two elements:
-#' - **$presmoothed** Array with rows the number of points on the grid, columns
-#' the number of curves, and the 3rd dimension representing the different pairs
-#' of grid points.
-#' - **$bandwidth** Double, containing the cross-validated bandwidth.
-#' If `separate = FALSE`, a list with two elements:
-#' - **$presmoothed** Array with rows the number of points on the grid, columns
-#' the number of curves, and the 3rd dimension representing the presmoothed
-#' smoothed at each of the `(t1, t2, t3)` points.
-#' of grid points.
-#' - **$bandwidth** Double, containing the cross-validated bandwidth.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param grid Vector / List containing the grid of points to smooth curves. If
+#' the input is a list, then smoothing is performed matching the i-th curve
+#' in `data` and the i-th element on the grid.
+#' @param bandwidth Numeric containing the bandwidth.
+#' @returns List, containing the smoothed curves.
 #' @export
 
-cv_smooth <- function(curves, grid, n_sample, separate, bw_inflate) {
+smooth_curves <- function(data, grid, bandwidth) {
 
-  #Stack matrix of time points and sort curves
-  sorted_grid <- sort(Reduce(c, split(grid, row(grid))), index.return = TRUE)
-
-  # Randomly sample learning curves for cross validation
-  learning_idx <- sample(x = seq_along(curves), size = n_sample)
-  sampled_curves <- curves[learning_idx]
-
-  # Extract and use the median bandwidth from the learning set
-  cv_bw <- purrr::map_dbl(sampled_curves,
-                          ~np:::npregbw(.x$x ~ .x$t, ckertype = "epanechnikov")$bw) |>
-    median()
-
-  # Option to inflate bandwidths with "uniform rates"
-  mfrak <- purrr::map_dbl(curves, ~length(.x$t)) |> mean()
-  if(bw_inflate) {
-    cv_bw <- log(mfrak)**(abs(log(cv_bw)) / log(mfrak))
-  }
-
-  # Using different curves to presmooth for t1, t2 and t2, t3
-  if(separate) {
-    # Extract the t1 and t3 points
-    t1t3 <- setdiff(sorted_grid$x, grid[2, ])
-    # Extract the index of t1 points
-    t1_idx <- t1t3 %in% grid[1, ]
-    # Sample size cardinality
-    n_split <- floor(length(curves) / 2)
-    # Presmooth curves at (t1, t3) by using first half of curves
-    presmoothed_t1t3 <- sapply(seq(n_split), function(i) {
-      obs_vec <- curves[[i]]$x
-      t_vec <- curves[[i]]$t
-      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
-              newdata = data.frame(t_vec = t1t3))
-    })
-    # Extract the curves at t1 and t3 points
-    presmoothed_t1_first <- presmoothed_t1t3[t1_idx, ]
-    presmoothed_t3 <- presmoothed_t1t3[!t1_idx, ]
-    # Presmooth at (t1, t2) using the second half of curves
-    t1t2 <- setdiff(sorted_grid$x, grid[3, ])
-    t2_idx <- t1t2 %in% grid[2, ]
-    presmoothed_t1t2 <- sapply((n_split + 1):(n_split * 2), function(i) {
-      obs_vec <- curves[[i]]$x
-      t_vec <- curves[[i]]$t
-      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
-              newdata = data.frame(t_vec = t1t2))
-    })
-    presmoothed_t2 <- presmoothed_t1t2[t2_idx, ]
-    presmoothed_t1_second <- presmoothed_t1t2[!t2_idx, ]
-    # Bind into array
-    list(presmoothed = abind::abind("presmoothed_t1_first" = presmoothed_t1_first,
-                                    "presmoothed_t3" = presmoothed_t3,
-                                    "presmoothed_t1_second" = presmoothed_t1_second,
-                                    "presmoothed_t2" = presmoothed_t2,
-                                    along = 3),
-         bandwidth = cv_bw)
+  if(is.list(grid)) {
+    weights_num <- purrr::map2(data, grid,
+                               ~epa_kernel(outer(.x$t, .y, FUN = "-") / bandwidth))
   } else {
-    #Presmooth using all curves
-    presmoothed <- lapply(curves, function(i) {
-      obs_vec <- i$x
-      t_vec <- i$t
-      predict(np:::npreg(obs_vec ~ t_vec, ckertype = "epanechnikov", bws = cv_bw),
-              newdata = data.frame(t_vec = sorted_grid$x))
-    })
-    presmoothed_t1 <- sapply(presmoothed,
-                             function(x) x[sorted_grid$ix %in%
-                                             seq(1, length(sorted_grid$x), by = 3)])
+    weights_num <- purrr::map(data,
+                              ~epa_kernel(outer(.x$t, grid, FUN = "-") / bandwidth))
 
-    presmoothed_t2 <- sapply(presmoothed,
-                             function(x) x[sorted_grid$ix %in%
-                                             seq(2, length(sorted_grid$x), by = 3)])
-
-    presmoothed_t3 <- sapply(presmoothed,
-                             function(x) x[sorted_grid$ix %in%
-                                             seq(3, length(sorted_grid$x), by = 3)])
-
-    list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
-                                    presmoothed_t3, along = 3),
-         bandwidth = cv_bw)
   }
-}
 
-
-#' Performs presmoothing for the purpose of parameter estimation with
-#' iterative plug-in bandwidth
-#'
-#' `locpoly_smooth` presmooths raw curves, for the purpose of
-#' parameter estimation. Uses an iterative local plug-in bandwidth approach
-#' for bandwidth selection. See references for more details.
-#'
-#' @param curves A list containing the raw data points with two entries:
-#' - **$t** Sampling points.
-#' - **$x** Observed Points
-#' @param grid Grid of points to estimate parameters. Must be a matrix, with
-#' the rows representing the 3 time points, `t1, t2, t3`, and the columns
-#' are the points on the estimation grid.
-#' @returns An `G x N x 3` array, where `G` is the number of points on the
-#' the grid and `N` is the number of curves.
-#' @references Hermann E. (1997) - Local Bandwidth Choice in Kernel
-#' Regression Estimation.
-#' @export
-
-locpoly_smooth <- function(curves, grid) {
-
-  sorted_grid <- sort(as.vector(grid), index.return = TRUE)
-
-  bandwidth_list <- purrr::map(curves,
-                               ~(lokern::lokerns(x = .x$t, y = .x$x,
-                                 x.out = sorted_grid$x)$bandwidth))
-
-  # bandwidth_list <- purrr::map(bandwidth_list,
-  #                              ~ifelse(.x <= 0.01, 0.01, .x))
-
-  bandwidth_t2 <- purrr::map(bandwidth_list,
-                             ~.x[sorted_grid$ix %in%
-                                   seq(2, length(sorted_grid$x), by = 3)])
-
-  bandwidth_t2_rep <- purrr::map(bandwidth_t2, ~rep(.x, each = 3))
-
-
-  presmoothed <- lapply(seq_along(curves), function(i) {
-    lokern::lokerns(curves[[i]]$t, curves[[i]]$x, x.out = sorted_grid$x,
-                    inputb = TRUE,
-                    bandwidth = bandwidth_t2_rep[[i]])
-  })
-
-  presmoothed_values <- purrr::map(presmoothed,
-                                   ~list(t = .x$x.out,
-                                         x = .x$est))
-
-  presmoothed_t1 <- sapply(presmoothed_values,
-                           function(x) x$x[sorted_grid$ix %in%
-                                           seq(1, length(sorted_grid$x), by = 3)])
-
-
-  presmoothed_t2 <- sapply(presmoothed_values,
-                           function(x) x$x[sorted_grid$ix %in%
-                                           seq(2, length(sorted_grid$x), by = 3)])
-
-  presmoothed_t3 <- sapply(presmoothed_values,
-                           function(x) x$x[sorted_grid$ix %in%
-                                           seq(3, length(sorted_grid$x), by = 3)])
-
-  list(presmoothed = abind::abind(presmoothed_t1, presmoothed_t2,
-                                  presmoothed_t3, along = 3),
-       bandwidth = bandwidth_t2_rep)
-}
-
-
-epa_smoother <- function(curves, grid_points, bandwidth) {
-  weights <- lapply(curves, function(i) {
-    epa_kernel(outer(i$t, grid_points, FUN = "-") / bandwidth)
-  })
-
-  weights_denom <- purrr::map(weights, ~colSums(.x))
-
-  #normalise and define 0 / 0 = 0
-  weights_norm <- purrr::map2(weights, weights_denom,
-                              ~sweep(.x, MARGIN = 2, STATS = .y, FUN = "/")) |>
+  weights_denom <- purrr::map(weights_num, ~colSums(.x))
+  weights <- purrr::map2(weights_num, weights_denom,
+                            ~sweep(.x, 2, .y, FUN = "/")) |>
     rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace")
 
-  mapply(function(x, y) t(x) %*% y$x, weights_norm, curves)
+  list(weights = weights,
+       smoothed_curves = purrr::map2(weights, data, ~c(crossprod(.x, .y$x))))
 }
 
-estimate_theta <- function(curves_u, curves_v) {
-  mean((curves_u - curves_v)**2)
-}
+#' Estimate moments for bandwidth constants
+#'
+#' Performs estimation of the second moments of the curves `Xt` and products
+#' `XtXs`. These moments appear as constants in bandwidth optimization problems.
+#' Moments are estimated on the same grid as the presmoothed curves, and a
+#' correction is made to adjust for sparse sampling schemes.
+#' @param presmoothed List, with each element containing vector of presmoothed
+#' curves.
+#' @returns A list, containing
+#' - **$moment2** Second moment of `Xt`.
+#' - **$moment2prod** Second moment of `XtXs`.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
+#' @export
+estimate_moments <- function(presmoothed) {
 
+  # Compute indicators for non-zero values
+  indic <- purrr::map(presmoothed, ~(.x$x**2 > 0) * 1)
+  sum_indic <- Reduce('+', indic)
+  # Compute m2 normalised by sum of indicators
+  m2 <- Reduce('+', purrr::map(presmoothed, ~.x$x**2)) / sum_indic
+  m2_mean <- (Reduce('+', purrr::map(presmoothed, ~.x$x)) / sum_indic)**2
+  m2_norm <- m2 - m2_mean
+  # Compute indicators for c2
+  indic_bi <- purrr::map(presmoothed, ~(outer(.x$x, .x$x)**2 > 0) * 1)
+  sum_indic_bi <- Reduce('+', indic_bi)
+  # Compute c2 normalised by sum of indicators
+  c2 <- Reduce('+', purrr::map(presmoothed, ~outer(.x$x, .x$x)**2)) / sum_indic_bi
+  c2_mean <- Reduce('+', purrr::map(presmoothed, ~outer(.x$x, .x$x))) / sum_indic_bi
+  c2_norm <- c2 - c2_mean**2
+
+  list(moment2 = m2_norm,
+       moment2prod = c2_norm)
+
+}
 
 #' Estimated the local regularity based on presmoothing
 #'
-#' Estimates the local regularity with supplied presmoothed curves.
-#'
-#' @param smoothed_curves An array with dimensions `G x N x 3` or `G x N x 4`,
-#' where the rows are the number of points on the grid used for estimation,
-#' the columns are the curves, the 3rd dimension depends on whether different
-#' curves are used for estimation.
-#' Should use either `locpoly_smooth` or `cv_smooth` as an auxiliary function
-#' to obtain the proper inputs.
-#' @returns A vector, whose length is equal to the number of sampling
-#' points the presmoothed curves takes values in.
-#' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
-#' estimation of irregular mean and covariance functions.
+#' Estimates the Hurst index `H` and Hölder constant `L` using presmoothing.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param grid Vector of points to estimate the regularity.
+#' @param bandwidth Bandwidth used to presmooth curves.
+#' @param intp Boolean, indicating whether to use interpolation method. If
+#' TRUE, presmoothing is first done at the observed time points with a
+#' prespecified bandwidth, before interpolating back on the t1, t2, t3 grid.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
 #' @export
-estimate_H <- function(smoothed_curves, weights) {
-  if(dim(smoothed_curves)[3] == 3) {
-    if(missing(weights)) {
-      theta1 <- rowMeans((smoothed_curves[,,1] - smoothed_curves[,,3])**2)
-      theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
-    } else {
-      theta1 <- rowMeans((weights * smoothed_curves[,,1] -
-                            weights * smoothed_curves[,,3])**2)
-      theta2 <- rowMeans((weights * smoothed_curves[,,2] -
-                            weights * smoothed_curves[,,3])**2)
-    }
-    H <- (log(theta1) - log(theta2)) / 2 * log(2)
-    pmin(pmax(H, 0.1), 1)
+estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
+                                nknots = 15) {
+
+  m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
+  delta <- exp(-log(m)**gamma)
+  t2 <- grid
+  t1 <- pmax(0, t2 - delta)
+  t3 <- pmin(1, t2 + delta)
+
+  t2[t2 == 0] <- (min(t1) + min(t3)) / 2
+  t2[t2 == 1] <- (max(t1) + max(t3)) / 2
+
+  if(intp) {
+    # Extract Tmi points to use as presmoothing grid plus {0, 1}
+    presmooth_grid <- purrr::map(data, ~c(0, .x$t, 1))
+    # Presmooth at Tmi points
+    presmoothed <- smooth_curves(data = data,
+                                 grid = presmooth_grid,
+                                 bandwidth = bandwidth)$smoothed_curves
+    # Interpolate back onto t1, t2, t3 grid
+    smoothed_t1 <- purrr::map2(data, presmoothed,
+                               ~interpolate1D(x = c(0, .x$t, 1),
+                                              y = .y,
+                                              xout = t1)$y)
+
+
+    smoothed_t2 <- purrr::map2(data, presmoothed,
+                               ~interpolate1D(x = c(0, .x$t, 1),
+                                              y = .y,
+                                              xout = t2)$y)
+
+
+    smoothed_t3 <- purrr::map2(data, presmoothed,
+                               ~interpolate1D(x = c(0, .x$t, 1),
+                                              y = .y,
+                                              xout = t3)$y)
+
   } else {
-    if(missing(weights)) {
-      theta1 <- rowSums((smoothed_curves[,,"presmoothed_t1_first"] -
-                           smoothed_curves[,,"presmoothed_t3"])**2) /
-        ncol(smoothed_curves[,,"presmoothed_t1_first"])
-
-      theta2 <- rowSums((smoothed_curves[,,"presmoothed_t1_second"] -
-                           smoothed_curves[,,"presmoothed_t2"])**2) /
-        ncol(smoothed_curves[,,"presmoothed_t1_second"])
-    }
-    else {
-      n_split <- floor(ncol(weights) / 2)
-      weights1 <- weights[, 1:n_split]
-      weights2 <- weights[, (n_split + 1):(n_split * 2)]
-      theta1 <- rowSums((weights1 * smoothed_curves[,,"presmoothed_t1_first"] -
-                         weights1 * smoothed_curves[,,"presmoothed_t3"])**2) /
-        ncol(weights1)
-      theta2 <- rowSums((weights2 * smoothed_curves[,,"presmoothed_t1_second"] -
-                         weights2 * smoothed_curves[,,"presmoothed_t2"])**2) /
-        ncol(weights2)
-    }
-    H <- (log(theta1) - log(theta2)) / 2 * log(2)
-    pmin(pmax(H, 0.1), 1)
+    # Smooth curves at t1 points
+    smoothed_t1 <- smooth_curves(data, t1, bandwidth)$smoothed_curves
+    # Smooth curves at t2 points
+    smoothed_t2 <- smooth_curves(data, t2, bandwidth)$smoothed_curves
+    # Smooth curves at t3 points
+    smoothed_t3 <- smooth_curves(data, t3, bandwidth)$smoothed_curves
   }
+
+  # Compute theta at (t1, t2)
+  theta12 <- purrr::map2(smoothed_t1, smoothed_t2, ~(.x - .y)**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Compute theta at (t1, t3)
+  theta13 <- purrr::map2(smoothed_t1, smoothed_t3, ~(.x - .y)**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Take the maximum between theta13 and theta12
+  theta13 <- purrr::map2_dbl(theta12, theta13, ~pmax(.x, .y))
+
+  # Compute H - Set lower and upper bounds to avoid degenerate values
+  hurst <- (log(theta13) - log(theta12)) / (2 * log(2))
+  hurst <- pmax(pmin(hurst, 1), 0.2)
+
+  hurst_fit <- stats::smooth.spline(x = t2,
+                                    y = hurst,
+                                    nknots = nknots)
+
+  hurst <- pmax(pmin(predict(hurst_fit, x = t2)$y, 1), 0.2)
+
+  # Compute L2
+  L_square <- theta13 / abs(t1 - t3)**(2 * hurst) |> pmax(0.1)
+
+  list(H = hurst,
+       L = sqrt(L_square))
+
 }
 
-#' Estimated the local Hölder constant based on presmoothing
+
+#' Estimate conditional variance
 #'
-#' Estimates the local Hölder constant with supplied presmoothed curves.
+#' Estimates the conditional variance of curves using ordered statistics,
+#' correcting for sparse regimes by selecting only points that are sufficiently
+#' close enough to each other.
 #'
-#' @param smoothed_curves An array with dimensions `G x N x 3`, where
-#' the rows are the number of points on the grid used for estimation,
-#' the columns are the curves, and the 3rd dimension represent the 3 time points.
-#' Should use `locpoly_smooth` as an auxiliary function to obtain the proper
-#' inputs.
-#' @param t_list Must be a matrix, with
-#' the rows representing the 3 time points, `t1, t2, t3`, and the columns
-#' are the points on the estimation grid.
-#' @param H A vector with estimated regularity from `estimate_H`, with
-#' the same length as the number of columns in `t_list`.
-#' @returns A vector, whose length is equal to the number of sampling
-#' points the presmoothed curves takes values in.
-#' @references Golovkine S., Klutchnikoff N., Patilea V. (2021) - Adaptive
-#' estimation of irregular mean and covariance functions.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param sigma_grid Vector containing the sampling points to estimate
+#' the conditional variance.
+#' @param h Optional numeric containing the bandwidth h, which is only
+#' used for correcting the diagonal band.
+#' @param h_power Numeric, power to raise the bandwidth to when using
+#' sigma for diagonal correction for the covariance function.
+#' @returns Vector containing sigma.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
 #' @export
-estimate_L <- function(smoothed_curves, t_list, H) {
-  theta1 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,3])**2)
-  theta2 <- rowMeans((smoothed_curves[,,2] - smoothed_curves[,,1])**2)
-  theta3 <- rowMeans((smoothed_curves[,,3] - smoothed_curves[,,1])**2)
 
-  L1 <- theta1 / abs(t_list[3, ] - t_list[2, ])**(2 * H)
-  L2 <- theta2 / abs(t_list[2, ] - t_list[1, ])**(2 * H)
-  L3 <- theta3 / abs(t_list[3, ] - t_list[1, ])**(2 * H)
+estimate_sigma <- function(data, sigma_grid, h, h_power = 0.9) {
 
-  #sqrt((L1 + L2) / 2)
-  sqrt(L3)
-}
+  m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
 
-#' Estimate moments of curves for downstream analysis
-#'
-#' `estimate_variance_curves` estimates the moments used in
-#' downstream adaptive estimation.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @param params Tibble of parameters, containing
-#' - **$H** Estimated regularity.
-#' - **$L** Estimated Hölder constant.
-#' @param grid_smooth Grid of points to smooth curves.
-#' @returns A list, containing
-#' - **$VarXt** Estimated Variance of `Xt`.
-#' - **$VarXtXs** Estimated Variance of `XtXs`.
-#' - **$EXt2** Estimated second moment of `Xt`.
-#' - **$EXtXs2** Estimated second momenet of `XtXs`.
-#' @export
-estimate_variance_curves <- function(data, params, grid_smooth) {
+  # Use a different b for the diagonal correction
+  if(missing(h)) {
+    b <- 0.1
+  } else {
+    b <- h**h_power
+  }
 
-  m <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-
-  X_hat <- sapply(data, function(i) lokern::lokerns(x = i$t,
-                                                    y = i$x,
-                                                    x.out = grid_smooth)$est)
-
-  E_Xt2 <- apply(X_hat**2, 1, mean, na.rm = TRUE)
-  var_Xt <- E_Xt2 - (apply(X_hat, 1, mean, na.rm = TRUE)**2)
-
-  #G X G matrix for each curve
-  X_hat_prod <- lapply(seq_along(data), function(i) {
-    X_hat[, i] %*% t(X_hat[, i])
+  # Calculate the ordered indexes of time points based on absolute distance
+  T_ordered <- lapply(data, function(i) {
+   apply(abs(outer(i$t, sigma_grid, FUN = "-")), 2, order)
   })
+  # Extract the closest and second closest indexes for each t
+  T_closest_idx <- purrr::map(T_ordered, ~apply(.x, 2, function(x) x[1]))
+  T_second_idx <- purrr::map(T_ordered, ~apply(.x, 2, function(x) x[2]))
+  # Extract the closest and second closest time points on each curve for each t
+  T_closest <- purrr::map2(data, T_closest_idx, ~.x$t[.y])
+  T_second <- purrr::map2(data, T_second_idx, ~.x$t[.y])
+  # Extract the closest and second closest observed points for each t
+  Y_closest <- purrr::map2(data, T_closest_idx, ~.x$x[.y])
+  Y_second <- purrr::map2(data, T_second_idx, ~.x$x[.y])
+  #Calculate squared differences
+  diff_squared <- purrr::map2(Y_closest, Y_second, ~(.x - .y)**2)
 
-  #use modifiedSum to ensure NAs do not affect the computation
-  modifiedSum <- function(x, y) {
-    replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
-  }
+  # Compute I(t;b)
+  indicators <- purrr::map(T_second, ~(abs(.x - sigma_grid) <= b) * 1)
 
-  X_bar_prod <- Reduce(modifiedSum, X_hat_prod) / length(X_hat_prod)
+  sum_indicators <- Reduce('+', indicators)
 
-  diff_var_prod <- lapply(X_hat_prod, function(i) {
-    (i - X_bar_prod)**2
-  })
+  # Compute sigma hat for each curve
+  sigma_hat_i <- purrr::map2(diff_squared, indicators, ~.x * .y)
 
-  var_XtXs <- Reduce(modifiedSum, diff_var_prod)/length(diff_var_prod)
+  # Average over all curves
+  sqrt(Reduce('+', sigma_hat_i) / (2 * sum_indicators))
 
-  EXtXs2 <- lapply(X_hat_prod, function(i) {
-    i^2
-  }) |> (\(x) Reduce(modifiedSum, x) / length(x))()
-
-  list(varXt = var_Xt, varXtXs = var_XtXs, EXt2 = E_Xt2,
-       EXtXs2 = EXtXs2)
-}
-
-#' Estimate pointwise noise level of curves using only observed points
-#'
-#' `estimate_sigma` estimates the variance of curves, using only
-#' information from curves.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @param grid_param Vector containing the sampling points to estimate
-#' the noise.
-#' @returns Vector with the same length as `grid_param`.
-#' @export
-
-estimate_sigma <- function(data, grid_param = seq(.1, .9, length.out = 20)) {
-  Mbar <- data |> purrr::map_dbl(~length(.x$t)) |> mean()
-  delta <- 2 * sqrt(log(Mbar)) / Mbar
-  #diffsq <- data |> purrr::map(~diff(sort(.x$x, decreasing = TRUE))**2)
-  idx <- data |> purrr::map(~order(.x$t))
-  diffsq <- data |> purrr::map2(idx, ~c(0, diff(.x$x[.y])**2))
-  #indic <- purrr::map2(data, idx, ~(abs(diff(.x$t[.y])) <= delta) * 1)
-  indic <- purrr::map(data,
-                      ~(abs(outer(.x$t, grid_param, FUN = "-")) <= delta) * 1)
-  sum_diffsq <- purrr::map2(diffsq, indic, ~t(.y) %*% .x)
-  denom <- purrr::map(indic, ~colSums(.x, na.rm = TRUE))
-  sum_diffsq_norm <- purrr::map2(sum_diffsq, denom, ~.x / (2 * .y))
-  modifiedSum <- function(x, y) {
-    replace(x, is.na(x), 0) + replace(y, is.na(y), 0)
-  }
-  c(sqrt(Reduce(modifiedSum, sum_diffsq_norm) / length(sum_diffsq_norm)))
 }
 
 
 #' Estimate minimum density of sample points
 #'
-#' `estimate_density` estimates the minimum density of time points using
-#' the kernel density estimator.
+#' Estimate the minimum density of sampling points using a kernel-density
+#' estimator, leaving out the boundary points to account for boundary bias.
 #'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @returns A number.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @returns Numeric containing the minimum density.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
 #' @export
 
 estimate_density <- function(data) {
+
   T_all <- data |> purrr::map(~.x$t) |> unlist() |> sort()
   min(density(T_all, from = 0.15, to = 0.85)$y)
+
 }
+
+
+
+#' Estimate parameters for FPCA
+#' Performs estimate of parameters used in FPCA, in particular the local
+#' regularity, moments, noise, and density of sampling points. See
+#' separate internal functions for more details.
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param grid_points Vector containing the sampling points to estimate the
+#' parameters.
+#' @param n_learn Learning set used for cross-validation bandwidth in the
+#' presmoothing step. See also `presmoothing_FPCA`.
+#' @param h_quantile Quantile of bandwidth selected to presmooth curves.
+#' @param intp Boolean, indicating whether to use interpolation method for
+#' estimating Hölder parameters. If TRUE, presmoothing is first done at the
+#' observed time points using a cross-validation bandwidth, before interpolating
+#' back on a grid of t1, t2, t3 points used to estimate H and L.
+#' @param gamma_H Numeric, power to be used in computing delta for Hurst index.
+#' @param gamma_L Numeric, power to be used in computing delta for Holder constant.
+#' @returns List, containing the following elements:
+#' - **$t** Vector of sampling points where estimation is performed.
+#' - **$H** Vector of Hurst indexes.
+#' - **$L** Vector of Hölder constants.
+#' - **$sigma** Vector of conditional variance / noise.
+#' - **$density** Numeric containing minimum density of sampling points.
+#' - **$moment2** Vector of second moments of `Xt`.
+#' - **$moment2prod** Matrix of second moment of products `XtXs`.
+#' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
+#' Functional Principal Components Analysis
+#' @export
+
+estimate_parameters_FPCA <- function(data, grid_points, n_learn, h_quantile,
+                                     intp = TRUE, gamma_H, gamma_L) {
+
+  # Presmooth curves
+  presmoothed_curves <- presmoothing_FPCA(data = data,
+                                          N0 = n_learn,
+                                          grid_smooth = grid_points,
+                                          q = h_quantile)
+  # Estimate H and L
+  hurst_estim <- estimate_regularity(data = data,
+                                     grid = grid_points,
+                                     bandwidth = presmoothed_curves$cv_bandwidth,
+                                     intp = intp,
+                                     gamma = gamma_H)$H
+
+  const_estim <- estimate_regularity(data = data,
+                                     grid = grid_points,
+                                     bandwidth = presmoothed_curves$cv_bandwidth,
+                                     intp = intp,
+                                     gamma = gamma_L)$L
+
+  # Estimate moments
+  moments <- estimate_moments(presmoothed = presmoothed_curves$presmoothed_curves)
+
+  # Estimate conditional variance
+  noise <- estimate_sigma(data = data,
+                          sigma_grid = grid_points)
+
+  # Estimate density of time points
+  sampling_density <- estimate_density(data = data)
+
+  list(t = grid_points,
+       H = hurst_estim,
+       L = const_estim,
+       sigma = noise,
+       density = sampling_density,
+       moments2 = moments$moment2,
+       moments2prod = moments$moment2prod)
+
+}
+
 
 
 #' Estimate the variance of raw data curves, which do not require
@@ -482,6 +374,7 @@ estimate_density <- function(data) {
 #' sampling points.
 #' @export
 estimate_variance_irreg <- function(data, grid_estim) {
+
   # Find the closest point Tmi to the grid t
   idx_grid <- lapply(data, function(x) {
     sapply(grid_estim, function(t) which.min(abs(t - x$t)))
@@ -499,15 +392,108 @@ estimate_variance_irreg <- function(data, grid_estim) {
   variance_y <- second_mom - mean_squared
 
   # Estimate variance of noise
-  variance_noise <- estimate_sigma(data, grid_param = grid_estim)**2
+  variance_noise <- estimate_sigma(data, sigma_grid = grid_estim)**2
 
   #Calculate the variance of true curves
   variance_y - variance_noise
-  # Pointless to correct for spacings - 1 / log(N) is pretty large
+
 }
 
 
+#' Estimate the regularity of dense functional data, by only performing
+#' interpolation and directly estimating H and L in the local neighbourhoods
+#' defined by delta.
+#'
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param xout Vector of sampling points to estimate the regularity parameters.
+#' @param method String, containing the interpolation method.
+#' @param gamma_H Numeric, power to be used in computing delta for Hurst index.
+#' @param gamma_L Numeric, power to be used in computinog delta for Holder
+#' constant.
+#' @returns List, containing the estimated H and L.
+#' @export
 
+estimate_regularity_dense <- function(data, xout, method, gamma_H, gamma_L) {
+
+  m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
+
+  delta_H <- exp(-log(m)**gamma_H)
+  delta_L <- exp(-log(m)**gamma_L)
+
+  t1_H <- pmax(0, xout - delta_H)
+  t3_H <- pmin(1, xout + delta_H)
+  t2_H <- xout
+  t2_H[t2_H == 0] <- (min(t1_H) + min(t3_H)) / 2
+  t2_H[t2_H == 1] <- (max(t1_H) + max(t3_H)) / 2
+
+  t1_L <- pmax(0, xout - delta_L)
+  t3_L <- pmin(1, xout + delta_L)
+  t2_L <- xout
+  t2_L[t2_L == 0] <- (min(t1_L) + min(t3_L)) / 2
+  t2_L[t2_L == 1] <- (max(t1_L) + max(t3_L)) / 2
+
+  intp_t2_H <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t2_H,
+                                               type = method))
+
+
+  intp_t1_H <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t1_H,
+                                               type = method))
+
+
+  intp_t3_H <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t3_H,
+                                               type = method))
+
+  intp_t2_L <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t2_L,
+                                               type = method))
+
+
+  intp_t1_L <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t1_L,
+                                               type = method))
+
+
+  intp_t3_L <- purrr::map(data, ~interpolate1D(x = .x$t,
+                                               y = .x$x,
+                                               xout = t3_L,
+                                               type = method))
+
+
+  theta12_H <- purrr::map2(intp_t1_H, intp_t2_H, ~(.x$y - .y$y)**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  theta13_H <- purrr::map2(intp_t1_H, intp_t3_H, ~(.x$y - .y$y)**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Take the maximum between theta13 and theta12
+  theta13_H <- purrr::map2_dbl(theta12_H, theta13_H, ~pmax(.x, .y))
+
+  theta13_L <- purrr::map2(intp_t1_L, intp_t3_L, ~(.x$y - .y$y)**2) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Compute H - Set lower and upper bounds to avoid degenerate values
+  hurst <- (log(theta13_H) - log(theta12_H)) / (2 * log(2))
+  hurst <- pmax(pmin(hurst, 1), 0.2)
+
+  # Compute L2
+  L_square <- theta13_L / abs(t1_L - t3_L)**(2 * hurst)
+
+  list(H = hurst,
+       L = sqrt(L_square))
+
+}
 
 
 
