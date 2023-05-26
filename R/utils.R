@@ -168,12 +168,12 @@ covariance_lll <- function(curves, grid, bandwidth = 0.1){
 }
 
 #' @export
-normalise_eigen <- function(covariance, nvalues = 10) {
+normalise_eigen <- function(covariance, nelements = 10) {
   eelements <- eigen(covariance, symmetric = TRUE)
-  evalues <- eelements$values[seq(nvalues)]
-  efunctions <- eelements$vectors[, seq(nvalues)]
+  evalues <- eelements$values[seq(nelements)]
+  efunctions <- eelements$vectors[, seq(nelements)]
   evalues_norm <- evalues / nrow(covariance)
-  efunctions_norm <- sapply(seq(nvalues), function(j) efunctions[, j] *
+  efunctions_norm <- sapply(seq(nelements), function(j) efunctions[, j] *
                               sqrt(nrow(covariance)))
   list(values = evalues_norm,
        vectors = efunctions_norm)
@@ -237,44 +237,113 @@ normalise_sign <- function(efunction, efunction_true) {
 }
 
 
-#' Corrects the diagonal band of covariance function
+#' Perform one dimensional interpolation
 #'
+#' Interpolation using `approx` from `stats`, where the extrapolation is done
+#' by using the closest observed point.
 #'
-#' @param mat_input Matrix, representing the covariance function.
-#' @param h Bandwidth used to smooth curve.
-#' @returns Matrix, with corrected diagonal band.
-#' @references Patilea V., Wang S. (2022+) - Adaptive Functional
+#' @param x Vector, providing the sampling points to be interpolated from.
+#' @param y Vector, providing the observed points to be interpolated from.
+#' @param xout Vector, providing where interpolation should take place.
+#' @param type String, specifying the interpolation method. Choices are either
+#' "linear" or "constant".
+#' @returns List, with the following components
+#' - **x** Vector, containing the interpolated sampling points.
+#' - **y** Vector, containing the interpolated points.
+#' @references Wang S., Patilea V., Klutchnikoff N. (2023+) - Adaptive Functional
 #' Principal Components Analysis
 #' @export
 
-correct_diag <- function(mat_input, h) {
+interpolate1D <- function(x, y, xout, type = "linear") {
 
-  K <- floor(1 * h * ncol(mat_input))
-  mat <- (lower.tri(mat_input, diag = TRUE) * 1) * mat_input
-  for(g in 2:ncol(mat)) {
-    current <- mat[max(K + 1, g - 1) , 1]
-    for(i in (g-1):floor((g + 1) / 2)) {
-      j <- g - i
-      if(abs(i - j) > K) {
-        current <- mat[i, j]
-      } else {
-        mat[i, j] <- current
-      }
-    }
-  }
+  stats::approx(x = x,
+                y = y,
+                xout = xout,
+                method = type,
+                yleft = y[1],
+                yright = y[length(y)])
 
-  for(g in (2 * ncol(mat)):(ncol(mat) + 2)) {
-    current <- mat[ncol(mat) , min(ncol(mat) - K, g - ncol(mat))]
-    for(i in ncol(mat):floor((g + 1)/ 2)) {
-      j <- g - i
-      if(abs(i - j) > K) {
-        current <- mat[i, j]
-      } else {
-        mat[i, j] <- current
-      }
-    }
+}
+
+
+#' Perform two dimensional interpolation
+#'
+#' Bilinear interpolation using `intp` package.
+#'
+#' @param x Vector, providing the `x` coordinates to be interpolated from.
+#' @param y Vector, providing the `y` coordinates to be interpolated from.
+#' @param z Matrix, containing the `z(x, y)` values to be interpolated from.
+#' @param xout Vector, providing the `x` coordinates where interpolation should
+#' take place.
+#' @param yout Vector, providing the `y` coordinates where interpolation should
+#' take place.
+#' @returns Matrix, containing the interpolated points for every `z(xout, yout)`.
+#' @references Wang S., Patilea V., Klutchnikoff N. (2023+) - Adaptive Functional
+#' Principal Components Analysis
+#' @export
+
+interpolate2D <- function(x, y, z, xout, yout) {
+
+  zout <- interp::bilinear.grid(x = y,
+                                y = y,
+                                z = z,
+                                nx = length(xout),
+                                ny = length(yout))
+
+  zout$z
+}
+
+
+#' Estimates smoothed mean from a dataset
+#'
+#' Smooths the empirical mean of a dataset using a lasso penalty.
+#' @param df Dataframe, with rows indexing the curves and columns indexing
+#' the time points.
+#' @param k Number of basis functions to be used in fit
+#' @returns A `glmnet` object, which can be used as input to `predict_mean` to
+#' evaluate the smoothed mean on a specified grid.
+#' @export
+
+learn_mean <- function (df, k = 50) {
+  true_mu <- unname(colMeans(df, na.rm = TRUE))
+  m <- ncol(df)
+  t <- seq(0, 1, length.out = m)
+  tfeatures <- matrix(NA, ncol = 2 * k + 1, nrow = length(t))
+  tfeatures[, 1] <- t
+  for (j in 1:k) {
+    tfeatures[, j + 1] <- sqrt(2) * cos(2 * j * pi * t)
+    tfeatures[, 2 * k + 2 - j] <- sqrt(2) * sin(2 * j * pi * t)
   }
-  mat + t(mat) - diag(diag(mat))
+  glmnet::glmnet(x = tfeatures, y = true_mu, alpha = 1)
+}
+
+
+#' Evaluates the smoothed mean on a grid
+#'
+#' Given a `glmnet` object, for example from the `learn_mean` function,
+#' `predict_mean` computes the function at specific evaluation points.
+#' @param u Vector of sampling points on which the mean which be computed at.
+#' @param model `glmnet` object containing the mean curve.
+#' @param lambda Numeric, representing the value of the regularisation parameter.
+#' @param k Number of basis functions used to fit the data.
+#' @param scale Boolean. If `TRUE`, scales the output by the global mean.
+#' @returns A numeric vector containing the mean curve evaluated on the vector of
+#' grid points `u`.
+#' @export
+predict_mean <- function (u, model, lambda, k = 50, scale) {
+  features <- matrix(NA, ncol = 2 * k + 1, nrow = length(u))
+  features[, 1] <- u
+  for (j in 1:k) {
+    features[, j + 1] <- sqrt(2) * cos(2 * j * pi * u)
+    features[, 2 * k + 2 - j] <- sqrt(2) * sin(2 * j * pi *
+                                                 u)
+  }
+  if(scale) {
+    muhat <- glmnet::predict.glmnet(model, newx = features, s = lambda)[, 1]
+    muhat - mean(muhat)
+  } else {
+    glmnet::predict.glmnet(model, newx = features, s = lambda)[, 1]
+  }
 }
 
 
