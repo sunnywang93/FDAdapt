@@ -152,7 +152,7 @@ estimate_derivative <- function(crv, #beta, const,
 #' uniform distribution.
 #' @returns A list containing the generated time points for `N` curves.
 #' @export
-generates_points <- function(N, m, distribution = runif, ...) {
+generate_points <- function(N, m, distribution = runif, ...) {
     M <- rpois(N, m)
     lapply(M, function(x) {
             sort(distribution(x, ...))
@@ -166,7 +166,9 @@ generates_points <- function(N, m, distribution = runif, ...) {
 #' @param hurst Hurst function.
 #' @param distortion_model Distortion function `A(.)` for the time points.
 #' @param variance_fun Variance function `v(t)^2`.
-#' @param sigma Noise level of curves.
+#' @param sigma0 Numeric, the baseline noise level of curves.
+#' @param hetero Boolean, indicating whether to generate heteroscedastic curves.
+#' See `sigma_het` function for more details.
 #' @param regular_grid Vector, containing the grid on which the true curves
 #' will lie.
 #' @param add_one_to_hurst Boolean, for use if fractional regularity (1 + ...)
@@ -181,7 +183,8 @@ generate_curves <- function(
     hurst,
     distortion_model = function(x) x,
     variance_fun = function(x) 1,
-    sigma = 0.1,
+    sigma0 = 0.1,
+    hetero = TRUE,
     regular_grid = seq(0, 1, l = 101),
     add_one_to_hurst = FALSE,
     norm_cov = FALSE,
@@ -243,7 +246,8 @@ generate_curves <- function(
         observed <- list(
             t = points_list[[i]],
             x = curves_random[[i]] +
-                rnorm(length(curves_random[[i]]), 0, sigma)
+                rnorm(n = length(points_list[[i]]),
+                      sd = sigma_het(sigma0, hetero, points_list[[i]]))
         )
         class(observed) <- "curves"
         if (add_one_to_hurst) {
@@ -305,6 +309,29 @@ sample_curve <- function(curve, grid) {
     idx <- map_dbl(grid, ~which.min(abs(.x - curve$t)))
     curve$x[idx]
 }
+
+
+#' Generates gaussian noise for function data
+#'
+#' Generates possibly heteroscedastic gaussian noise of functional data,
+#' based on the observed time points of one curve.
+#' Heteroscedasticity is generated using sin functions.
+#'
+#' @param sigma0 Numeric, baseline noise level where the noise will be centered
+#' around.
+#' @param hetero Boolean, where TRUE indicate
+#' @param t_vec Vector, containing the sampling points for
+#' @returns A list containing the noise for each curve if `hetero = TRUE`. If
+#' not, a numeric will be returned.
+#' @export
+sigma_het <- function(sigma0, hetero = TRUE, t_vec) {
+  if(hetero) {
+    sigma0 * (1 + sin(8 * pi * t_vec) / 3)
+  } else {
+    sigma0
+  }
+}
+
 
 
 
