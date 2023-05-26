@@ -9,11 +9,13 @@ generate_curves(
   hurst,
   distortion_model = function(x) x,
   variance_fun = function(x) 1,
-  sigma = 0.1,
+  sigma0 = 0.1,
+  hetero = TRUE,
   regular_grid = seq(0, 1, l = 101),
   add_one_to_hurst = FALSE,
   norm_cov = FALSE,
   L = 1,
+  novar = FALSE,
   ...
 )
 }
@@ -27,7 +29,10 @@ for one curve.}
 
 \item{variance_fun}{Variance function \code{v(t)^2}.}
 
-\item{sigma}{Noise level of curves.}
+\item{sigma0}{Numeric, the baseline noise level of curves.}
+
+\item{hetero}{Boolean, indicating whether to generate heteroscedastic curves.
+See \code{sigma_het} function for more details.}
 
 \item{regular_grid}{Vector, containing the grid on which the true curves
 will lie.}
