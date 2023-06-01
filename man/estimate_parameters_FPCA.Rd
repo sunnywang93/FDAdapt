@@ -14,7 +14,8 @@ estimate_parameters_FPCA(
   h_quantile,
   intp = TRUE,
   gamma_H,
-  gamma_L
+  gamma_L,
+  nknots
 )
 }
 \arguments{
@@ -40,6 +41,8 @@ back on a grid of t1, t2, t3 points used to estimate H and L.}
 \item{gamma_H}{Numeric, power to be used in computing delta for Hurst index.}
 
 \item{gamma_L}{Numeric, power to be used in computing delta for Holder constant.}
+
+\item{nknots}{Numeric, number of knots used for smoothing H and L.}
 }
 \value{
 List, containing the following elements:

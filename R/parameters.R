@@ -123,6 +123,8 @@ estimate_moments <- function(presmoothed) {
 #' @param intp Boolean, indicating whether to use interpolation method. If
 #' TRUE, presmoothing is first done at the observed time points with a
 #' prespecified bandwidth, before interpolating back on the t1, t2, t3 grid.
+#' @param gamma Numeric, power for computing delta.
+#' @param nknots Numeric, number of knots to be used for smoothing H & L.
 #' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
 #' Functional Principal Components Analysis
 #' @export
@@ -303,6 +305,7 @@ estimate_density <- function(data) {
 #' back on a grid of t1, t2, t3 points used to estimate H and L.
 #' @param gamma_H Numeric, power to be used in computing delta for Hurst index.
 #' @param gamma_L Numeric, power to be used in computing delta for Holder constant.
+#' @param nknots Numeric, number of knots used for smoothing H and L.
 #' @returns List, containing the following elements:
 #' - **$t** Vector of sampling points where estimation is performed.
 #' - **$H** Vector of Hurst indexes.
@@ -316,7 +319,7 @@ estimate_density <- function(data) {
 #' @export
 
 estimate_parameters_FPCA <- function(data, grid_points, n_learn, h_quantile,
-                                     intp = TRUE, gamma_H, gamma_L) {
+                                     intp = TRUE, gamma_H, gamma_L, nknots) {
 
   # Presmooth curves
   presmoothed_curves <- presmoothing_FPCA(data = data,
@@ -328,13 +331,15 @@ estimate_parameters_FPCA <- function(data, grid_points, n_learn, h_quantile,
                                      grid = grid_points,
                                      bandwidth = presmoothed_curves$cv_bandwidth,
                                      intp = intp,
-                                     gamma = gamma_H)$H
+                                     gamma = gamma_H,
+                                     nknots = nknots)$H
 
   const_estim <- estimate_regularity(data = data,
                                      grid = grid_points,
                                      bandwidth = presmoothed_curves$cv_bandwidth,
                                      intp = intp,
-                                     gamma = gamma_L)$L
+                                     gamma = gamma_L,
+                                     nknots = nknots)$L
 
   # Estimate moments
   moments <- estimate_moments(presmoothed = presmoothed_curves$presmoothed_curves)

@@ -17,6 +17,7 @@ FPCA(
   nelements = 10,
   gamma_H,
   gamma_L,
+  n_knots,
   h_power,
   intp_param,
   true_params
@@ -54,6 +55,9 @@ to discretization error from estimating the regularity.}
 
 \item{gamma_L}{Numeric, indicating the gamma to be used for estimation of
 \code{L}. See \code{estimate_regularity}.}
+
+\item{n_knots}{Numeric, number of knots used for smoothing H and L, where
+splines are used.}
 
 \item{h_power}{Numeric, power to raise the bandwidth to when estimating
 sigma for the purposes of diagonal correction.}

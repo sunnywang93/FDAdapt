@@ -20,6 +20,10 @@ estimate_regularity(data, grid, bandwidth, intp = TRUE, gamma, nknots = 15)
 \item{intp}{Boolean, indicating whether to use interpolation method. If
 TRUE, presmoothing is first done at the observed time points with a
 prespecified bandwidth, before interpolating back on the t1, t2, t3 grid.}
+
+\item{gamma}{Numeric, power for computing delta.}
+
+\item{nknots}{Numeric, number of knots to be used for smoothing H & L.}
 }
 \description{
 Estimates the Hurst index \code{H} and Hölder constant \code{L} using presmoothing.

@@ -123,7 +123,7 @@ bw_FPCA <- function(data, parameters, h_grid, t_grid, inflate = TRUE,
     apply(2, function(x) pracma::trapz(t_grid, x))
 
   # Compute risk
-  risk <- bias_term + variance_term + regularising_term
+  risk <- bias_term + 2 * variance_term + regularising_term
 
   min_idx <- which.min(risk)
 
@@ -182,10 +182,10 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
 
   # Interpolate 2D-parameter
     mom2prod_smooth <- interpolate2D(x = parameters$t,
-                                   y = parameters$t,
-                                   z = parameters$moments2prod,
-                                   xout = t_grid,
-                                   yout = t_grid)
+                                     y = parameters$t,
+                                     z = parameters$moments2prod,
+                                     xout = t_grid,
+                                     yout = t_grid)
 
   # Append to list of parameters
     param_smooth$moments2prod <- mom2prod_smooth
@@ -211,7 +211,7 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
                                                 param_smooth$moments2 * x))
 
   # Compute bias term
-  bias_term_val <- 4 * sweep(bias_t_val, 2, bias_s_val, FUN = "*")
+  bias_term_val <- sweep(bias_t_val, 2, bias_s_val, FUN = "*")
 
   #End of bias term for eigenvalues ===========================================
 
@@ -243,7 +243,7 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
 
   # Compute bias constants
   bias_cst <- sapply(seq_along(lambda_vec),
-                     function(j) 2 / sum((lambda_vec[j] - lambda_vec[-j])**2))
+                     function(j) 1 / sum((lambda_vec[j] - lambda_vec[-j])**2))
 
   bias_term_fun <- sweep(bias_t_fun + bias_s_fun, 2, bias_cst, FUN = "*")
 
@@ -364,8 +364,8 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
 
 
   # Compute risk
-  risk_val <- bias_term_val + variance_term_val + regularising_term_val
-  risk_fun <- bias_term_fun + variance_term_fun + regularising_term_fun
+  risk_val <- 4 * bias_term_val + 2 * variance_term_val + regularising_term_val
+  risk_fun <- 2 * bias_term_fun + 2 * variance_term_fun + regularising_term_fun
 
   min_idx_val <- apply(risk_val, 2, which.min)
   min_idx_fun <- apply(risk_fun, 2, which.min)
@@ -386,7 +386,7 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
   }
   # Return h_star
   list(bw_val= h_star_val,
-        bw_fun = h_star_fun)
+       bw_fun = h_star_fun)
 
 }
 
@@ -412,7 +412,8 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
 #' Functional Principal Components Analysis
 #' @export
 
-cov_FPCA <- function(data, h, h_power, t_smooth, center = TRUE, sigma_true) {
+cov_FPCA <- function(data, h, h_power, t_smooth, center = TRUE, sigma_true,
+                     diag_cor) {
 
 # Smooth curves at optimal bandwidth
 smoothed <- smooth_curves(data = data, grid = t_smooth, bandwidth = h)
@@ -442,24 +443,27 @@ Gamma_cen <- Gamma / WN_bi
 # Compute diagonal band correction
 
 # Compute sigma's for the diagonal band
-if(missing(sigma_true)) {
-  sigma_hat <- estimate_sigma(data = data, sigma_grid = t_smooth, h = h,
-                              h_power = h_power)
-} else {
-  sigma_hat <- sigma_true
-}
+  if(missing(sigma_true)) {
+    sigma_hat <- estimate_sigma(data = data, sigma_grid = t_smooth, h = h,
+                                h_power = h_power)
+  } else {
+    sigma_hat <- sigma_true
+  }
 
-
-# Compute multiplicative term
-norm_diag <- tcrossprod(sigma_hat) / WN_bi
-# Compute diagonal sum
-diag_sum <- Reduce('+',
-                   purrr::map2(wi, smoothed$weights,
-                               ~tcrossprod(.x) * crossprod(.y)))
-# Compute diagonal bias
-diag_bias <- diag_sum * norm_diag
-# Correct diagonal band
-Gamma_cen - diag_bias
+  if(diag_cor) {
+    # Compute multiplicative term
+    norm_diag <- tcrossprod(sigma_hat) / WN_bi
+    # Compute diagonal sum
+    diag_sum <- Reduce('+',
+                       purrr::map2(wi, smoothed$weights,
+                                   ~tcrossprod(.x) * crossprod(.y)))
+    # Compute diagonal bias
+    diag_bias <- diag_sum * norm_diag
+    # Correct diagonal band
+    Gamma_cen - diag_bias
+  } else {
+    Gamma_cen
+  }
 
 }
 
@@ -490,6 +494,8 @@ Gamma_cen - diag_bias
 #' `H`. See `estimate_regularity`.
 #' @param gamma_L Numeric, indicating the gamma to be used for estimation of
 #' `L`. See `estimate_regularity`.
+#' @param n_knots Numeric, number of knots used for smoothing H and L, where
+#' splines are used.
 #' @param h_power Numeric, power to raise the bandwidth to when estimating
 #' sigma for the purposes of diagonal correction.
 #' @param intp_param Boolean, where `TRUE` indicates using presmoothing + interpolation
@@ -505,8 +511,8 @@ Gamma_cen - diag_bias
 FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                  quantile, inflate_bw = TRUE,
                  center = TRUE, interp_method = "linear",
-                 nelements = 10, gamma_H, gamma_L, h_power,
-                 intp_param, true_params) {
+                 nelements = 10, gamma_H, gamma_L, n_knots, h_power,
+                 intp_param, true_params, diag_cor = TRUE) {
 
   # Estimate parameters
   if(missing(true_params)) {
@@ -516,7 +522,8 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                                             h_quantile = quantile,
                                             intp = intp_param,
                                             gamma_H = gamma_H,
-                                            gamma_L = gamma_L)
+                                            gamma_L = gamma_L,
+                                            nknots = n_knots)
   } else {
     params_FPCA <- true_params
   }
@@ -535,13 +542,15 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                                 h = bandwidth_FPCA,
                                 h_power = h_power,
                                 t_smooth = grid_smooth,
-                                center = center)
+                                center = center,
+                                diag_cor = diag_cor)
   } else {
     covariance_FPCA <- cov_FPCA(data = data,
                                 h = bandwidth_FPCA,
                                 t_smooth = grid_smooth,
                                 center = center,
-                                sigma_true = true_params$sigma)
+                                sigma_true = true_params$sigma,
+                                diag_cor = diag_cor)
   }
 
 
@@ -584,6 +593,8 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
 #' `H`. See `estimate_regularity`.
 #' @param gamma_L Numeric, indicating the gamma to be used for estimation of
 #' `L`. See `estimate_regularity`.
+#' @param n_knots Numeric, number of knots used for smoothing H and L, where
+#' splines are used.
 #' @param h_power Numeric, power to raise bandwidth to when estimating sigma
 #' for the purposes of diagonal correction for the covariance function.
 #' @param intp_param Boolean, where `TRUE` indicates using presmoothing + interpolation
@@ -602,8 +613,8 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
 FPCA_adapt <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                        quantile, inflate_bw = TRUE,
                        center = TRUE, interp_method = "linear",
-                       nelements = 10, gamma_H, gamma_L,
-                       h_power, intp_param, true_params) {
+                       nelements = 10, gamma_H, gamma_L, n_knots,
+                       h_power, intp_param, true_params, diag_cor = TRUE) {
 
   # Obtain preliminary estimates of eigen-elements
   if(missing(true_params)) {
@@ -619,8 +630,10 @@ FPCA_adapt <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                              nelements = nelements,
                              gamma_H = gamma_H,
                              gamma_L = gamma_L,
+                             n_knots = n_knots,
                              h_power = h_power,
-                             intp_param = intp_param)
+                             intp_param = intp_param,
+                             diag_cor = diag_cor)
   } else {
     eelements_prelim <- FPCA(data = data,
                              grid_smooth = grid_smooth,
@@ -632,7 +645,8 @@ FPCA_adapt <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                              center = center,
                              interp_method = interp_method,
                              nelements = nelements,
-                             true_params = true_params)
+                             true_params = true_params,
+                             diag_cor = diag_cor)
   }
 
 
@@ -651,7 +665,8 @@ FPCA_adapt <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                                                         h = .x,
                                                         h_power = h_power,
                                                         t_smooth = grid_smooth,
-                                                        center = center)) |>
+                                                        center = center,
+                                                        diag_cor = diag_cor)) |>
     purrr::map(~normalise_eigen(.x, nelements = nelements)$values)
 
   val_adapt <- purrr::map_dbl(seq_len(length(eigen_val)), ~eigen_val[[.x]][.x])
@@ -660,7 +675,8 @@ FPCA_adapt <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
                                                         h = .x,
                                                         h_power = h_power,
                                                         t_smooth = grid_smooth,
-                                                        center = center)) |>
+                                                        center = center,
+                                                        diag_cor = diag_cor)) |>
     purrr::map(~normalise_eigen(.x, nelements = nelements)$vectors)
 
   fun_adapt <- sapply(seq_len(length(eigen_fun)),
