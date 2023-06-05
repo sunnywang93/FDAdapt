@@ -58,7 +58,7 @@ bw_FPCA <- function(data, parameters, h_grid, t_grid, inflate = TRUE,
   bias_s <- pracma::trapz(t_grid, param_smooth$moments2)
 
   # Compute bias term
-  bias_term <-  4 * bias_t * bias_s
+  bias_term <- bias_t * bias_s
 
   # Compute variance at (s|t)
   variance_s_num <- outer(param_smooth$sigma**2, param_smooth$moments2)
@@ -123,7 +123,7 @@ bw_FPCA <- function(data, parameters, h_grid, t_grid, inflate = TRUE,
     apply(2, function(x) pracma::trapz(t_grid, x))
 
   # Compute risk
-  risk <- bias_term + 2 * variance_term + regularising_term
+  risk <- 4  * bias_term + 2 * variance_term + regularising_term
 
   min_idx <- which.min(risk)
 
@@ -133,7 +133,7 @@ bw_FPCA <- function(data, parameters, h_grid, t_grid, inflate = TRUE,
   # Inflate by discretisation error if desired
   if(inflate) {
     m <- mean(purrr::map_dbl(data, ~length(.x$t)))
-    h_constant <- log(1 / h_star)**(log(1 / h_star) / log(length(data) * m))
+    h_constant <- log(1 / h_star)
     h_star <- h_constant * h_star
   }
   # Return h_star
@@ -377,10 +377,8 @@ bw_FPCA_adapt <- function(data, parameters, h_grid, t_grid, psi_mat,
   # Inflate by discretisation error if desired
   if(inflate) {
     m <- mean(purrr::map_dbl(data, ~length(.x$t)))
-    h_constant_val <- log(1 / h_star_val)**(log(1 / h_star_val) /
-                                              log(length(data) * m))
-    h_constant_fun <- log(1 / h_star_fun)**(log(1 / h_star_fun) /
-                                              log(length(data) * m))
+    h_constant_val <- log(1 / h_star_val)
+    h_constant_fun <- log(1 / h_star_fun)
     h_star_val <- h_constant_val * h_star_val
     h_star_fun <- h_constant_fun * h_star_fun
   }
