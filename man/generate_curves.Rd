@@ -14,7 +14,6 @@ generate_curves(
   regular_grid = seq(0, 1, l = 101),
   add_one_to_hurst = FALSE,
   norm_cov = FALSE,
-  L = 1,
   novar = FALSE,
   ...
 )

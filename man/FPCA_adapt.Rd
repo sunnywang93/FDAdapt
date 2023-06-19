@@ -20,7 +20,8 @@ FPCA_adapt(
   n_knots,
   h_power,
   intp_param,
-  true_params
+  true_params,
+  diag_cor = TRUE
 )
 }
 \arguments{
@@ -48,7 +49,8 @@ to discretization error from estimating the regularity.}
 
 \item{center}{Boolean, indicating whether to center curves.}
 
-\item{nelements}{Numeric, indicating the number of eigen-elements to keep.}
+\item{nelements}{Numeric, indicating the number of eigen-elements to keep.
+Numeric must be at least 3.}
 
 \item{gamma_H}{Numeric, indicating the gamma to be used for estimation of
 \code{H}. See \code{estimate_regularity}.}

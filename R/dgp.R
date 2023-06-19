@@ -188,7 +188,6 @@ generate_curves <- function(
     regular_grid = seq(0, 1, l = 101),
     add_one_to_hurst = FALSE,
     norm_cov = FALSE,
-    L = 1,
     novar = FALSE,
     ...
 ) {
@@ -202,7 +201,7 @@ generate_curves <- function(
 
     # Simulate values from covariance function
     curves <- lapply(covariance_list, function(covariance) {
-      MASS::mvrnorm(1, mu = rep(0, ncol(covariance)), Sigma = L * covariance)
+      MASS::mvrnorm(1, mu = rep(0, ncol(covariance)), Sigma = covariance)
       })
 
     # Create new sample paths with matched variance

@@ -4,7 +4,7 @@
 \alias{cov_FPCA}
 \title{Compute the FPCA covariance function}
 \usage{
-cov_FPCA(data, h, h_power, t_smooth, center = TRUE, sigma_true)
+cov_FPCA(data, h, h_power, t_smooth, center = TRUE, sigma_true, diag_cor)
 }
 \arguments{
 \item{data}{List of curves, with each element/curve containing two entries:

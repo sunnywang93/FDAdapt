@@ -20,7 +20,8 @@ FPCA(
   n_knots,
   h_power,
   intp_param,
-  true_params
+  true_params,
+  diag_cor = TRUE
 )
 }
 \arguments{

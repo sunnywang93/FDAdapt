@@ -587,6 +587,7 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
 #' for the parametrs from `grid_param` onto `grid_smooth`. Options include
 #' c("linear", "constant", "nearest", "spline", "cubic").
 #' @param nelements Numeric, indicating the number of eigen-elements to keep.
+#' Numeric must be at least 3.
 #' @param gamma_H Numeric, indicating the gamma to be used for estimation of
 #' `H`. See `estimate_regularity`.
 #' @param gamma_L Numeric, indicating the gamma to be used for estimation of
