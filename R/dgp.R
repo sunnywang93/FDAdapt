@@ -140,9 +140,10 @@ estimate_derivative <- function(crv, #beta, const,
 }
 
 
-#' Generate random time points for functional data.
+#' Generate sampling points for functional data
 #'
-#' Generates sampling points in the random design framework, where the exact
+#' Generates sampling points either for common or random design functional
+#' data. For random design, the exact
 #' number of points per curve are generated according to a Poisson distribution
 #' with `m` average number of points.
 #'
@@ -150,22 +151,40 @@ estimate_derivative <- function(crv, #beta, const,
 #' @param m Average number of observed points per curve.
 #' @param distribution The distribution of the sampling points. Defaults to the
 #' uniform distribution.
-#' @returns A list containing the generated time points for `N` curves.
+#' @param common Boolean, indicating whether sampling scheme should be common
+#' design or sampling design.
+#' @param tmin Numeric, left endpoint of the sampling grid.
+#' @param tmax Numeric, right endpoint of the sampling grid.
+#' @returns A list or a vector, depending on `common`. If `common = FALSE`, a list
+#' containing the generated time points for each curve is returned.
+#' If `common = TRUE`, a vector containing the sampling points is returned.
 #' @export
-generate_points <- function(N, m, distribution = runif, ...) {
+generate_points <- function(N, m, distribution = runif,
+                            common = FALSE, tmin = NULL,
+                            tmax = NULL, ...) {
+
+  if(common) {
+    if(is.null(tmin) | is.null(tmax)) {
+      stop("tmin and tmax must be supplied when common = TRUE")
+    } else {
+      seq(tmin, tmax, length.out = m)
+    }
+  } else {
     M <- rpois(N, m)
     lapply(M, function(x) {
-            sort(distribution(x, ...))
-      })
+      sort(distribution(x, ...))
+    })
+  }
+
 }
 
-#' Generate curves in the functional data framework.
+#' Generate random design curves in the functional data framework.
 #'
 #' @param points_list List where each element contains the sampling points
 #' for one curve.
 #' @param hurst Hurst function.
 #' @param distortion_model Distortion function `A(.)` for the time points.
-#' @param variance_fun Variance function `v(t)^2`.
+#' @param variance_fun Variance function.
 #' @param sigma0 Numeric, the baseline noise level of curves.
 #' @param hetero Boolean, indicating whether to generate heteroscedastic curves.
 #' See `sigma_het` function for more details.
@@ -175,6 +194,8 @@ generate_points <- function(N, m, distribution = runif, ...) {
 #' is desired.
 #' @param norm_cov Boolean, indicating whether covariance should be normalised
 #' by constant associated to multi-fractional brownian motion.
+#' @param novar Boolean, indicating whether variance function should not be
+#' matched. `TRUE` results in variance not being matched.
 #' @returns A list, containing the ideal and sampled curves, together with other
 #' auxiliary information.
 #' @export
@@ -273,6 +294,80 @@ generate_curves <- function(
     out$curves <- out_curves
     class(out) <- "curves_ideal_observed"
     out
+}
+
+
+#' Generate common design curves in the functional data framework.
+#'
+#' @param points_vector Vector containing the common sampling points for all
+#' curves.
+#' @param hurst Hurst function.
+#' @param distortion_model Distortion function `A(.)` for the time points.
+#' @param variance_fun Variance function.
+#' @param N Number of curves to simulate.
+#' @param sigma0 Numeric, the baseline noise level of curves.
+#' @param hetero Boolean, indicating whether to generate heteroscedastic curves.
+#' See `sigma_het` function for more details.
+#' @param novar Boolean, indicating whether variance function should not be
+#' matched. `TRUE` results in variance not being matched.
+#' @param norm_cov Boolean, indicating whether covariance should be normalised
+#' by constant associated to multi-fractional brownian motion.
+#' @returns A list, containing the ideal and sampled curves, together with other
+#' auxiliary information.
+#' @export
+generate_curves_common <- function(points_vector,
+                                   hurst,
+                                   distortion_model = function(x) x,
+                                   variance_fun = function(x) 1,
+                                   N,
+                                   sigma0 = 0.1,
+                                   hetero = TRUE,
+                                   novar = FALSE,
+                                   norm_cov = FALSE,
+                                   ...)
+{
+
+  pp_disto <- distortion_model(points_vector)
+  covariance <- covariance_mfbm(points_vector,
+                                hurst,
+                                pp_disto,
+                                norm = norm_cov)
+
+  curves <- MASS::mvrnorm(N,
+                          mu = rep(0, ncol(covariance)),
+                          Sigma = covariance)
+
+  if(novar == FALSE) {
+    curves <- apply(curves, 1, function(z) {
+      sqrt(variance_fun(points_vector)) *
+        distortion_model(points_vector)**(-hurst(points_vector)) *
+        z
+    })
+  }
+
+  out_ideal <- lapply(seq_len(N), function(n) {
+    list(t = points_vector,
+         x = curves[n, ])
+  })
+
+  out_observed <- lapply(seq_len(N), function(n) {
+    list(t = points_vector,
+         x = curves[n, ] +
+           rnorm(n = length(points_vector),
+                 sd = sigma_het(sigma0, hetero, points_vector)))
+  })
+
+
+  out <- list()
+  out$t_min <- min(points_vector)
+  out$t_max <- max(points_vector)
+  out$x_min <- min(curves)
+  out$x_max <- max(curves)
+  class(out) <- "curves_ideal_observed"
+  out$curves <- list(ideal = out_ideal,
+                     observed = out_observed)
+  out
+
 }
 
 

@@ -501,8 +501,8 @@ Gamma_cen <- Gamma / WN_bi
 #' @returns List, containing the following elements:
 #' - **$params** List containing the estimated parameters.
 #' - **$bw** Numeric containing the bandwidth used for smoothing curves.
-#' - **$evalues** Vector containing the eigenvalues.
-#' - **$efunctions** Matrix containing the eigenfunctions, with the j-th
+#' - **$evalues** Vector containing the normalised eigenvalues.
+#' - **$efunctions** Matrix containing the normalised eigenfunctions, with the j-th
 #' column representing the j-th eigenfunction.
 #' @export
 
@@ -599,8 +599,8 @@ FPCA <- function(data, grid_smooth, grid_bw, grid_param, cv_set,
 #' @param intp_param Boolean, where `TRUE` indicates using presmoothing + interpolation
 #' to estimate regularity parameters, as compared to only presmoothing.
 #' @returns List, containing the following elements:
-#' - **$evalues** Vector containing the eigenvalues.
-#' - **$efunctions** Matrix containing the eigenfunctions, with the j-th
+#' - **$evalues** Vector containing the normalised eigenvalues.
+#' - **$efunctions** Matrix containing the normalised eigenfunctions, with the j-th
 #' column representing the j-th eigenfunction.
 #' - **$bw_val** Vector containing the bandwidth used to smooth curves for each
 #' eigenvalue.

@@ -2,9 +2,17 @@
 % Please edit documentation in R/dgp.R
 \name{generate_points}
 \alias{generate_points}
-\title{Generate random time points for functional data.}
+\title{Generate sampling points for functional data}
 \usage{
-generate_points(N, m, distribution = runif, ...)
+generate_points(
+  N,
+  m,
+  distribution = runif,
+  common = FALSE,
+  tmin = NULL,
+  tmax = NULL,
+  ...
+)
 }
 \arguments{
 \item{N}{Number of curves.}
@@ -13,12 +21,22 @@ generate_points(N, m, distribution = runif, ...)
 
 \item{distribution}{The distribution of the sampling points. Defaults to the
 uniform distribution.}
+
+\item{common}{Boolean, indicating whether sampling scheme should be common
+design or sampling design.}
+
+\item{tmin}{Numeric, left endpoint of the sampling grid.}
+
+\item{tmax}{Numeric, right endpoint of the sampling grid.}
 }
 \value{
-A list containing the generated time points for \code{N} curves.
+A list or a vector, depending on \code{common}. If \code{common = FALSE}, a list
+containing the generated time points for each curve is returned.
+If \code{common = TRUE}, a vector containing the sampling points is returned.
 }
 \description{
-Generates sampling points in the random design framework, where the exact
+Generates sampling points either for common or random design functional
+data. For random design, the exact
 number of points per curve are generated according to a Poisson distribution
 with \code{m} average number of points.
 }

@@ -74,8 +74,8 @@ c("linear", "constant", "nearest", "spline", "cubic").}
 \value{
 List, containing the following elements:
 \itemize{
-\item \strong{$evalues} Vector containing the eigenvalues.
-\item \strong{$efunctions} Matrix containing the eigenfunctions, with the j-th
+\item \strong{$evalues} Vector containing the normalised eigenvalues.
+\item \strong{$efunctions} Matrix containing the normalised eigenfunctions, with the j-th
 column representing the j-th eigenfunction.
 \item \strong{$bw_val} Vector containing the bandwidth used to smooth curves for each
 eigenvalue.

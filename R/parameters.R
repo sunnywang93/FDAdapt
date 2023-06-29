@@ -96,15 +96,19 @@ estimate_moments <- function(presmoothed) {
   indic <- purrr::map(presmoothed, ~(.x$x**2 > 0) * 1)
   sum_indic <- Reduce('+', indic)
   # Compute m2 normalised by sum of indicators
-  m2 <- Reduce('+', purrr::map(presmoothed, ~.x$x**2)) / sum_indic
-  m2_mean <- (Reduce('+', purrr::map(presmoothed, ~.x$x)) / sum_indic)**2
+  m2 <- (Reduce('+', purrr::map(presmoothed, ~.x$x**2)) / sum_indic) |>
+    (\(x) replace(x, is.na(x), 0))()
+  m2_mean <- ((Reduce('+', purrr::map(presmoothed, ~.x$x)) / sum_indic)**2) |>
+    (\(x) replace(x, is.na(x), 0))()
   m2_norm <- m2 - m2_mean
   # Compute indicators for c2
   indic_bi <- purrr::map(presmoothed, ~(outer(.x$x, .x$x)**2 > 0) * 1)
   sum_indic_bi <- Reduce('+', indic_bi)
   # Compute c2 normalised by sum of indicators
   c2 <- Reduce('+', purrr::map(presmoothed, ~outer(.x$x, .x$x)**2)) / sum_indic_bi
+  c2[is.nan(c2)] <- 0
   c2_mean <- Reduce('+', purrr::map(presmoothed, ~outer(.x$x, .x$x))) / sum_indic_bi
+  c2_mean[is.nan(c2_mean)] <- 0
   c2_norm <- c2 - c2_mean**2
 
   list(moment2 = m2_norm,

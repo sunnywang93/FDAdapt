@@ -192,42 +192,45 @@ eigen_error <- function(eigen_estim, eigen_true) {
        efunctions_error = evectors_error)
 }
 
-eigen_interpolate <- function(curves, grid_smooth, nvalues) {
+
+#' Perform FPCA by interpolation
+#'
+#' Linearly interpolate curves and obtain eigen-elements by eigen-decomposition
+#' of the empirical mean and covariance functions
+#'
+#' @param curves List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param grid_smooth Vector of sampling points to perform interpolation.
+#' @param nelements Numeric containing the number of eigen-elements to return.
+#' @returns List, with the following components
+#' - **evalues** Vector, containing the normalised eigenvalues.
+#' - **efunctions** Matrix, containing the normalised eigenfunctions.
+#' @export
+eigen_interpolate <- function(curves, grid_smooth, nelements) {
+
   smoothed_curves <- sapply(curves, function(i) {
-    pracma::interp1(x = c(0, i$t, 1),
-                    y = c(i$x[1], i$x, i$x[length(i$x)]),
-                    xi = grid_smooth, method = "linear")
+    stats::approx(x = i$t,
+                  y = i$x,
+                  xout = grid_smooth,
+                  method = "linear",
+                  yleft = i$x[1],
+                  yright = i$x[length(i$x)])$y
   })
+
   mean <- rowMeans(smoothed_curves, na.rm = TRUE)
   centered_curves <- smoothed_curves - mean
-  cov <- sapply(seq_along(curves), function(i) {
-    centered_curves[, i] %*% t(centered_curves[, i])
-  }, simplify = "array") |>
-    apply(MARGIN = c(1, 2), mean, na.rm = TRUE)
-  eelements <- eigen(cov, symmetric = TRUE)
-  evalues <- eelements$values[1:nvalues] / length(grid_smooth)
-  efunctions <- eelements$vectors[, 1:nvalues] * sqrt(grid_smooth)
-  list(evalues = evalues, efunctions = efunctions)
+  cov_all <- lapply(seq_along(curves),
+                    function(i) tcrossprod(centered_curves[, i]))
+
+  cov <- Reduce('+', cov_all) / length(cov_all)
+
+  eelements <- normalise_eigen(cov, nelements)
+  list(evalues = eelements$values, efunctions = eelements$vectors)
+
 }
 
-#need to be careful with the diagonal terms
-eigen_kneip <- function(curves, grid_smooth, nvalues) {
-  smoothed_curves <- sapply(curves, function(i) {
-    pracma::interp1(x = c(-i$t[1], i$t, 2 - i$t[length(i$t)]),
-                    y = c(i$x[1], i$x, i$x[length(i$x)]),
-                    xi = grid_smooth, method = "nearest")
-  })
-  mean <- rowMeans(smoothed_curves)
-  centered_curves <- smoothed_curves - mean
-  cov <- sapply(seq_along(curves), function(i) {
-    centered_curves[, i] %*% t(centered_curves[, i])
-  }, simplify = "array") |>
-    apply(MARGIN = c(1, 2), mean, na.rm = TRUE)
-  eelements <- eigen(cov, symmetric = TRUE)
-  evalues <- eelements$values[1:nvalues] / length(grid_smooth)
-  efunctions <- eelements$vectors[, 1:nvalues] * sqrt(grid_smooth)
-  list(evalues = evalues, efunctions = efunctions)
-}
+
 
 #' @export
 normalise_sign <- function(efunction, efunction_true) {
@@ -261,7 +264,8 @@ interpolate1D <- function(x, y, xout, type = "linear") {
                 xout = xout,
                 method = type,
                 yleft = y[1],
-                yright = y[length(y)])
+                yright = y[length(y)],
+                ties = mean)
 
 }
 
