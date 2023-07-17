@@ -13,3 +13,28 @@ RoxygenNote: 7.2.3
 Depends: 
     R (>= 4.1.0)
 LazyData: true
+URL: https://github.com/sunnywang93/FDAdapt
+Imports: 
+    abind,
+    fdapace,
+    glmnet,
+    interp,
+    MASS,
+    np,
+    pracma,
+    purrr,
+    stats
+Suggests: 
+    doParallel,
+    dplyr,
+    fda,
+    forcats,
+    foreach,
+    fs,
+    functional,
+    ggplot2,
+    patchwork,
+    readr,
+    reshape2,
+    stringr,
+    tidyr
