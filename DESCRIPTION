@@ -1,15 +1,15 @@
 Package: FDAdapt
 Title: Adaptive Functional Principal Components Analysis
-Version: 0.0.0.9000
+Version: 1.0.1
 Authors@R: 
     person("Sunny", "Wang", , "sunny.wang@ensai.fr", role = c("aut", "cre"),
            comment = c(ORCID = "YOUR-ORCID-ID"))
-Description: Performs functional principal components analysis on 1D curves using an adaptive bandwidth. Tailored for irregularly sampled curves with low regularity.
+Description: Performs functional principal components analysis on 1D curves using an adaptive bandwidth.
 License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
     license
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.2.3
 Depends: 
-    R (>= 2.10)
+    R (>= 4.10)
 LazyData: true
