@@ -15,6 +15,6 @@ Please note that `R` version >= 4.1 is required.
 
 ## References
 
-The methodological and theoretical aspects can be found in the following paper"
+The methodological and theoretical aspects can be found in the following paper:
 
 https://arxiv.org/abs/2306.16091
