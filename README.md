@@ -5,13 +5,13 @@ Adaptive Functional Principal Components Analysis
 
 ## Installation
 
-To install the latest version directly from [Github], please use
+To install the latest version directly from Github, please use
 
 ``` r
 devtools::install_github("sunnywang93/FDAdapt")
 ```
 
-Please note that `R` version >= 4.1 is required. 
+Please note that `R` version >= 4.1.0 is required. 
 
 ## References
 
