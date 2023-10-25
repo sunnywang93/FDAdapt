@@ -2,15 +2,16 @@
 % Please edit documentation in R/FPCA.R
 \name{bw_FPCA}
 \alias{bw_FPCA}
-\title{Compute FPCA bandwidth without index specific constants}
+\title{Compute fully adaptive FPCA bandwidth}
 \usage{
 bw_FPCA(
   data,
-  parameters,
+  param_smooth,
   h_grid,
   t_grid,
-  inflate = TRUE,
-  interp_type = "linear"
+  psi_mat,
+  lambda_vec,
+  inflate = TRUE
 )
 }
 \arguments{
@@ -20,24 +21,28 @@ bw_FPCA(
 \item \strong{$x} Vector of observed points along each curve.
 }}
 
-\item{parameters}{List of parameters, which can be obtained from
-\code{estimate_parameters_FPCA}.}
-
 \item{h_grid}{Vector of points for bandwidth optimization.}
 
-\item{t_grid}{Vector of sampling points to smooth curves.}
+\item{t_grid}{Vector of sampling points to smooth curves, should be in the
+interval \verb{[0, 1]}.}
+
+\item{psi_mat}{Matrix containing the eigenfunctions, with columns
+representing the j-th eigenfunction and the rows are evaluated points on
+a grid.}
+
+\item{lambda_vec}{Vector of eigenvalues, whose length must match the number
+of columns of \code{psi_mat}.}
 
 \item{inflate}{Boolean, indicating whether to inflate bandwidth as a
 correction for the discretization error from estimating regularity.}
-}
-\value{
-Numeric, containing the optimal bandwidth.
+
+\item{para_smooth}{List of estimated parameters.}
 }
 \description{
-Performs estimation of the FPCA bandwidth when all the \emph{index specific}
-constants are dropped for the risk bound, resulting in a single bandwidth
-for both the eigenvalues and the eigenfunctions, instead of a different
-bandwidth for each eigenvalue and eigenfunction.
+Performs estimation of the FPCA bandwidth for each index of the eigenvalues
+and eigenfunctions separately, leading to 2 * J different bandwidths, where
+J indicates the number of eigen-elements considered. Differences in bandwidths
+are driven by the different constants specific to each eigen-element.
 }
 \references{
 Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive

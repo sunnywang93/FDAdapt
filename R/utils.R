@@ -350,6 +350,402 @@ predict_mean <- function (u, model, lambda, k = 50, scale) {
   }
 }
 
+#' Check if curves are sampled on a common design scheme
+#'
+#' @export
+check_common <- function(x, y) {
+
+  if(identical(x, y)) {
+    y
+  } else {
+    FALSE
+  }
+
+}
+
+
+#' Computes the maximum (over observed points) Nadaraya-Watson weights
+#'
+#' @param curves List, containing the following elements:
+#' -**t** Vector, containing the sampling points of curves.
+#' -**x** Vector, containing the observed points.
+#' @param x Vector, containing the evaluation points.
+#' @param bw Vector, containing the grid of bandwidth points.
+#' @returns Array of dimension `G x N x H`, corresponding to the
+#' number of evaluation points, curves, and bandwidth points respectively.
+#' @export
+NW_max <- function(curves, x, bw) {
+
+  weights_max <- lapply(curves, function(i) {
+    epa_kernel(outer(outer(i$t, x, FUN = "-"),
+                     bw, FUN = "/")) |>
+      apply(c(2, 3), max)
+  })
+
+  weights_denom <- lapply(curves, function(i) {
+    epa_kernel(outer(outer(i$t, x, FUN = "-"),
+                     bw, FUN = "/")) |>
+      colSums()
+  })
+
+ purrr::map2(weights_max, weights_denom, ~(.x / .y)) |>
+   rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace") |>
+   abind::abind(along = 3) |>
+   aperm(c(1, 3, 2))
+
+}
+
+
+#' Computes the weights for curve selection
+#'
+#' Given a list of functional data and a grid of points `x`, indicator functions
+#' are computed which checks if there is at least one point along a curve
+#' in the neighbourhood (defined by a bandwidth) of an evaluation point in `x`.
+#'
+#' @param curves List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param x Vector, containing the evaluation points.
+#' @param h Vector or numeric, containing the bandwidth.
+#' @returns Array of dimension `G x N x H`, corresponding to the
+#' number of evaluation points, curves, and bandwidth points respectively.
+#' @export
+#'
+curves_select <- function(curves, x, h) {
+
+  wi <- lapply(curves, function(curve) {
+    abs(outer(curve$t, x, FUN = "-")) |>
+      outer(h, FUN = "<=") |>
+      (\(x) (colSums(x) >= 1) * 1)()
+    }) |>
+    abind::abind(along = 3) |>
+    aperm(c(1, 3, 2))
+
+  if(dim(wi)[3] == 1) {
+    wi[,, 1]
+  } else {
+    wi
+  }
+
+}
+
+#' Computes part of bias term involving kernels in adaptive estimation
+#'
+#' @param H Vector containing the Hölder exponents.
+#' @param L Vector containing the Hölder constants.
+#' @param cst Vector containing the constant term depending on the kernel.
+#' @param h_grid Vector containing the grid of bandwidths.
+#' @returns Vector with the same length as `H`, `L` and `cst`.
+#' @export
+
+bias_kernel <- function(H, L, cst, h_grid) {
+
+  identicalValue <- function(x,y) if (identical(x,y)) x else FALSE
+
+  if(is.logical(Reduce(identicalValue, length(H), length(L), length(cst)))) {
+    stop("H, L and cst must be of the same length!")
+  }
+
+  outer(h_grid, 2 * H, FUN = "^") |>
+    sweep(MARGIN = 2, STATS = L**2, FUN = "*") |>
+    sweep(MARGIN = 2, STATS = cst, FUN = "*")
+
+}
+
+#' Interpolates elements of a list
+#'
+#' Performs 1D and 2D interpolation of elements in a list
+#'
+#' @param list_in List, containing
+#' -**t** Vector of evaluation points in which the elements of the list were
+#' computed on.
+#' -Vector or matrices of to be interpolated.
+#' @param xout Vector, containing the desired output evaluation points.
+#' @returns List, with each element interpolated onto the grid of `xout`.
+#' @export
+
+intp_list <- function(list_in, xout) {
+
+  # Interpolate 1D-parameters onto smoothing grid
+  if(length(list_in$t) != length(xout)) {
+
+    list_sub <- list_in[purrr::map_lgl(list_in, ~is.vector(.x) && length(.x) > 1)]
+
+    list_smooth <- lapply(within(list_sub, rm(t)),
+                          function(i) interpolate1D(x = list_in$t,
+                                                    y = i,
+                                                    xout = xout)$y)
+
+    # Interpolate 2D-parameters
+    list2D_smooth <- lapply(list_in[purrr::map_lgl(list_in, ~is.matrix(.x))],
+                            function(X) interpolate2D(x = list_in$t,
+                                                      y = list_in$t,
+                                                      z = X,
+                                                      xout = xout,
+                                                      yout = xout)
+    )
+
+
+    # Append to list of parameters
+    c(list_smooth,
+      list_in[purrr::map_lgl(list_in, ~length(.x) == 1)],
+      list2D_smooth
+      )
+
+  } else {
+    list_in
+  }
+
+
+}
+
+#' Computes the variance rate term of the covariance function
+#'
+#' This quantity computes the term that governs that rate of convergence of
+#' the variance term for the covariance function.
+#'
+#' @param curves List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param x Vector containing the evaluation points in one dimension. The final
+#' quantity is computed over the cartesian product of (`x`, `x`).
+#' @param bw Vector containing the grid of bandwidths.
+#' @returns List, containing two elements:
+#' - **WN_bi** Array of dimension G x G x H, where G is the length of `x` and
+#' `H` is the length of `bw`. This term contains the effective sample size for
+#' a given bandwidth in the estimation of the covariance function.
+#' - **Ngamma** Array of dimension G x G x H, where G is the length of `x` and
+#' `H` is the length of `bw`. This term contains the variance term in the risk
+#' bounds of the covariance function, which contributes to the rate of convergence.
+#' @export
+
+N_gamma <- function(curves, x, bw) {
+
+  wi <- curves_select(curves = curves,
+                      x = x,
+                      h = bw)
+
+  WN_bi <- sapply(seq_along(curves), function(i) {
+    sapply(seq_along(bw), function(h) {
+      tcrossprod(wi[,i,h])
+    }, simplify = "array")
+  }, simplify = "array") |>
+    aperm(c(4, 1, 2, 3)) |>
+    colSums()
+
+  Wm_max <- NW_max(curves = curves,
+                   x = x,
+                   bw = bw)
+
+  Ngamma <- sapply(seq_along(curves), function(i) {
+    sapply(seq_along(bw), function(h) {
+      tcrossprod(wi[,i,h] * Wm_max[,i,h], wi[,i,h])
+    }, simplify = "array")
+  }, simplify = "array") |>
+    aperm(c(4, 1, 2, 3)) |>
+    colSums() |>
+    (\(x) (x / WN_bi**2)**(-1))()
+
+  Ngamma[is.nan(Ngamma)] <- 0
+
+  list(
+    WN_bi = WN_bi,
+    Ngamma = Ngamma
+  )
+
+}
+
+
+#' Computes the diagonal bias of the covariance function
+#'
+#' @param curves List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param t_grid Vector of evaluation points where curves are smoothed.
+#' @param h Numeric containing the bandwidth (usually an optimal one).
+#' @param zeta Numeric containing the power of the bandwidth.
+#' @param wm_list List, where each element contains an Mi x G matrix of
+#' Nadaraya-Watson weights, where Mi is the number of points along curve i and
+#' G is the length of `t_grid`.
+#' @param W Matrix of dimension G x N, where N is the number of curves. It
+#' contains the weights for curves selection, resulting from the function `curves_select`.
+#' @param WN Matrix of dimension G x G, containing the number of effective sample
+#' size used for covariance function estimation.
+#' @returns Matrix, containing the diagonal bias.
+#' @export
+
+diagonal_bias <- function(curves, t_grid, h, zeta, wm_list, W, WN) {
+
+
+  sigma_diag <- estimate_sigma(data = curves,
+                               sigma_grid = t_grid,
+                               h = h,
+                               h_power = zeta)
+
+
+  diag_sum <- purrr::imap(wm_list,
+                          ~crossprod(.x) * tcrossprod(W[, .y])) |>
+    (\(x) Reduce('+', x))()
+
+  tcrossprod(sigma_diag) * diag_sum / WN
+
+}
+
+
+
+
+#' Computes the empirical mean of functional data
+#'
+#' Given a learning and online set of curves, the empirical mean on the
+#' sampling points of the online set is computed. The empirical mean is first
+#' computed on the commonly sampled points of the learning set (assumed to be
+#' densely observed, without noise), before interpolation is performed onto
+#' the sampling points of the online set (assumed to be on a randomly designed
+#' grid).
+#'
+#'
+#' @param curves_learn List of learning curves, containing the following as elements:
+#' - **$t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @param curves_online List of online curves, containing the following as elements:
+#' - **t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @returns List, containing the mean function at the sampling points of the
+#' online set and the interpolated points from the learning set.
+#' @export
+
+mean_emp <- function(curves_learn, curves_online) {
+
+  if(is.logical(Reduce(check_common, purrr::map(curves_learn, ~.x$t)))) {
+    stop("learning curves have must common sampling points!")
+  }
+
+  mu_learn <- Reduce('+', purrr::map(curves_learn, ~.x$x)) / length(curves)
+
+  mu_online <- purrr::map(curves_online,
+                          ~interpolate1D(x = curves_learn[[1]]$t,
+                                         y = mu_learn,
+                                         xout = .x$t))
+  list(
+    mu_learn = list(t = curves[[1]]$t,
+                    x = mu_learn),
+    mu_online = purrr::map(mu_online, ~list(t = .x$x,
+                                            x = .x$y))
+
+  )
+
+}
+
+#' Computes the empirical covariance function for functional data
+#'
+#' Given a list of commonly sampled functional data, the empirical mean
+#' is computed on the sampling points, before interpolation if an optional grid
+#' of output is specified. Note that if the evaluation points are specified,
+#' the covariance function is first constructed by centering each curve at
+#' the observed points, before interpolation is done.
+#'
+#' @param curves_learn List of learning curves, containing the following as elements:
+#' - **$t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @param curves_online List of online curves, containing the following as elements:
+#' - **t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @returns List, containing the following elements:
+#' -**$cov_learn** Matrix containing the covariance function from the learning set.
+#' -**$cov_online** List, containing the sampling points from the online set and
+#' the interpolated covariance function.
+#' @export
+
+cov_emp <- function(curves_learn, curves_online) {
+
+  if(is.logical(Reduce(check_common, purrr::map(curves_learn, ~.x$t)))) {
+    stop("learning curves have must common sampling points!")
+  }
+
+  mu_emp <- mean_emp(curves_learn = curves_learn,
+                     curves_online = curves_online)
+
+  cov_learn <- purrr::map(curves_learn, ~.x$x - mu_emp$mu_learn$x) |>
+    purrr::map(~tcrossprod(.x)) |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  cov_out <- purrr::map(curves_online,
+                        ~interpolate2D(x = curves_learn[[1]]$t,
+                                       y = curves_learn[[1]]$t,
+                                       z = cov_learn,
+                                       xout = .x$t,
+                                       yout = .x$t)
+                        )
+
+  list(cov_learn = cov_learn,
+       cov_online = purrr::map2(curves_online, cov_out,
+                                  ~list(t = .x$t, cov = .y)),
+       mu_learn = mu_emp$mu_learn,
+       mu_online = mu_emp$mu_online
+       )
+
+
+}
+
+
+#' Computes PACE estimates based on a learning and online set of curves
+#'
+#' Given a list of commonly sampled functional data, the conditional
+#' expectation of the scores given the observed values are computed. The
+#' plug-in estimates of the conditional expectation are the empirical
+#' mean, covariance, and eigen-elements.
+#'
+#' @param curves_learn List of learning curves, containing the following as elements:
+#' - **$t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @param curves_online List of online curves, containing the following as elements:
+#' - **t** Vector of sampling points.
+#' - **$x** Vector of observed points.
+#' @param sigma Numeric, containing the noise of the online curves.
+#' @returns List, containing the scores for each online curve.
+#' @export
+
+PACE_emp <- function(curves_learn, curves_online, sigma) {
+
+  if(is.logical(Reduce(check_common, purrr::map(curves_learn, ~.x$t)))) {
+    stop("learning curves have must common sampling points!")
+  }
+
+  cov <- cov_emp(curves_learn = curves_learn,
+                 curves_online = curves_online)
+
+  cov_noisy <- purrr::map(cov$cov_online,
+                          ~.x$cov + diag(sigma**2,
+                                         nrow = nrow(.x$cov),
+                                         ncol = ncol(.x$cov))
+                          )
+
+  eelements <- eigen(cov$cov_learn, symmetric = TRUE)
+
+  efunctions_out <- purrr::map(curves_online,
+                               ~apply(eelements$vectors, 2,
+                                      function(v) {
+                                        interpolate1D(x = curves_learn[[1]]$t,
+                                                      y = v,
+                                                      xout = .x$t)$y
+                                        }
+                                      )
+                               )
+
+
+  curves_cen <- purrr::map2(curves_online, cov$mu_online,
+                            ~.x$x - .y$x)
+
+  lapply(seq_along(curves_online), function(id) {
+    sweep(efunctions_out[[id]], 2, eelements$values, FUN = "*") |>
+      apply(2, function(v) t(v) %*% solve(cov_noisy[[id]]) %*% curves_cen[[id]])
+  })
+
+
+}
+
+
+
 
 #' Powerconsumption data set
 #'

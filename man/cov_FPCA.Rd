@@ -4,7 +4,7 @@
 \alias{cov_FPCA}
 \title{Compute the FPCA covariance function}
 \usage{
-cov_FPCA(data, h, h_power, t_smooth, center = TRUE, sigma_true, diag_cor)
+cov_FPCA(data, h, h_power, t_smooth, center = TRUE, sigma, diag_cor)
 }
 \arguments{
 \item{data}{List of curves, with each element/curve containing two entries:
@@ -23,6 +23,11 @@ be computed at bi-dimensional grid points constructed from this vector.}
 
 \item{center}{Boolean, indicating whether to center curves by their mean
 function.}
+
+\item{sigma}{Vector, containing the estimated noise for the purposes of
+diagonal correction.}
+
+\item{diag_cor}{Boolean, indicating whether to perform diagonal correction.}
 }
 \value{
 Matrix of dimension \verb{length(t_smooth) x length(t_smooth)}.

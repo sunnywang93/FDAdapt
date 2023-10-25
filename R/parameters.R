@@ -292,6 +292,7 @@ estimate_density <- function(data) {
 
 
 #' Estimate parameters for FPCA
+#'
 #' Performs estimate of parameters used in FPCA, in particular the local
 #' regularity, moments, noise, and density of sampling points. See
 #' separate internal functions for more details.

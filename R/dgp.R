@@ -405,16 +405,16 @@ sample_curve <- function(curve, grid) {
 }
 
 
-#' Generates gaussian noise for function data
+#' Generates gaussian standard deviation for function data
 #'
-#' Generates possibly heteroscedastic gaussian noise of functional data,
-#' based on the observed time points of one curve.
+#' Generates possibly heteroscedastic standard deviation for gaussian nosie of
+#' functional data, based on the observed time points of one curve.
 #' Heteroscedasticity is generated using sin functions.
 #'
 #' @param sigma0 Numeric, baseline noise level where the noise will be centered
 #' around.
 #' @param hetero Boolean, where TRUE indicate
-#' @param t_vec Vector, containing the sampling points for
+#' @param t_vec Vector, containing the evaluation points
 #' @returns A list containing the noise for each curve if `hetero = TRUE`. If
 #' not, a numeric will be returned.
 #' @export
@@ -511,4 +511,171 @@ plot.curves_with_estimated_derivatives <- function(
         )
     }
 }
+
+
+#' Approximate input functions using Fourier bases
+#'
+#' Performs approximation of input functions (primarily used for eigenfunctions
+#' ) using orthonormal Fourier bases and LASSO regression.
+#'
+#' @param psi_t Vector containing the evaluation points.
+#' @param psi_x Vector containing the observed points.
+#' @param K Numeric indicating the number of Fourier bases functions to use
+#' for approximating input function.
+#' @returns Vector containing the coefficients from LASSO regression.
+#' @export
+
+psi_approx <- function(psi_t, psi_x, K) {
+
+  # Create orthonormal fourier bases for approximation
+  fourier_base <- sqrt(2) * (sin(2 * pi * outer(psi_t, seq_len(K))) +
+  cos(2 * pi * outer(psi_t, seq_len(K))))
+
+  # Perform cross-validation to obtain smoothing parameter for LASSO
+  pen_cv <- glmnet::cv.glmnet(x = fourier_base,
+                      y = psi_x,
+                      alpha = 1,
+                      type.measure = "mse")
+
+  # Perform LASSO regression with mse-min parameter
+  pen_reg <- glmnet::glmnet(x = fourier_base,
+                            y = psi_x,
+                            alpha = 1,
+                            lambda = pen_cv$lambda.min)
+
+  # Bind intercept and coefficients for return
+  unname(c(pen_reg$a0, pen_reg$beta[, 1]))
+
+}
+
+# Be careful - K + 1 must be greater than or equal to number of columns of psi!
+
+#' Generates functional data using Karhunen-Loève decomposition
+#'
+#' Sample paths of a stochastic process are generated using the
+#' Karhunen-Loève decomposition, for given eigenvalues and
+#' eigenfunction pairs. The input eigenfunctions are approximated
+#' by orthogonal Fourier bases using a LASSO regression, before a
+#' gram-schmidt orthonormalisation is performed so that the
+#' approximated eigenfunctions remain orthonormal.
+#'
+#' @param lambda Vector of eigenvalues.
+#' @param psi List, containing the following elements:
+#' - **t** Vector of evaluation points for the eigenfunctions.
+#' - **x** Matrix, with each column containing the j-th eigenfunction
+#' at evaluation points `t`.
+#' @param K Numeric, the number of Fourier bases used to approximate
+#' the eigenfunctions. K should be greater than the number of input
+#' eigenfunctions you are trying to approximate.
+#' @param points_list List, containing the evaluation points for each
+#' curve.
+#' @param mu List, containing the following elements:
+#' - **t** Vector of evaluation points for the mean function.
+#' - **x** Vector containing the observed points of the mean function.
+#' @param sigma_sd Vector / Numeric, containing the standard deviation
+#' structure of the gaussian noise to be added to sample paths.
+#' @param xi_fam Character, indicating the distribution to generate
+#' the scores from. Gaussian, uniform and chi-squared distributions
+#' are currently available.
+#' @returns List, with each element containing the following:
+#' -**curves** List of curves, containing a vector of evaluation points
+#' and observed points.
+#' -**mu** List, containing a vector of evaluation points and
+#' observed points. The observed points are computed based on the closest point
+#' from the mean function on the input evaluation points and the evaluation point
+#' of the curves.
+#' -**zeta** Vector of length K, containing the true scores.
+#' -**v** Matrix with the columns containing the approximated jth eigenfunction.
+#' -**sigma** Vector containing the gaussian noise added each curve.
+#' @export
+
+generate_KL <- function(lambda,
+                        psi,
+                        K,
+                        points_list,
+                        mu,
+                        sigma0,
+                        hetero,
+                        zeta_fam = c("gaussian", "unif", "chi2")) {
+
+  # Approximate each eigenfunction with fourier bases function
+  coef_lasso <- apply(psi$x, 2, function(x) psi_approx(psi$t, x, K))
+
+  # Orthonormalise coefficient matrix
+  ortho_coef <- pracma::gramSchmidt(A = coef_lasso)
+
+  # Construct basis functions on (possibly) random grid
+  fourier_base_grid <- lapply(points_list, function(points) {
+    sqrt(2) * (sin(2 * pi * outer(points, seq_len(K))) +
+                 cos(2 * pi * outer(points, seq_len(K))))
+  }) |>
+    purrr::map(~cbind(rep(1, nrow(.x)), .x))
+
+  # Generate scores
+  zeta <- lapply(seq_along(points_list), function(i) {
+    switch(zeta_fam,
+           "gaussian" = sqrt(lambda) * rnorm(n = ncol(psi$x)),
+           "unif" = sqrt(lambda) * runif(n = ncol(psi$x),
+                                         min = -sqrt(3),
+                                         max = sqrt(3)),
+           "chi2" = sqrt(lambda / 2) * (rchisq(n = ncol(psi$x),
+                                              df = 1) - 1)
+           )
+  })
+
+
+  # Simulate sample paths
+  paths <- purrr::map2(fourier_base_grid, zeta,
+                       ~sweep(.x %*% ortho_coef$Q, 2, .y, FUN = "*") |>
+                         rowSums())
+
+  # Add mean curve to sample paths
+
+  mu_idx <- lapply(seq_along(points_list), function(i) {
+    sapply(points_list[[i]], function(x) which.min(abs(x - mu$t)))
+  })
+
+  paths_shift <- purrr::map2(paths, mu_idx, ~.x + mu$x[.y])
+
+  sigma_list <- purrr::map(points_list,
+                           ~rnorm(n = length(.x),
+                                  sd = sigma_het(sigma0 = sigma0,
+                                                 hetero = TRUE,
+                                                 t_vec = .x)))
+
+  # Return relevant objects
+  lapply(seq_along(paths_shift), function(x) {
+    list(curves = list(t = points_list[[x]],
+                       x = paths_shift[[x]] + sigma_list[[x]]),
+         mu = list(t = mu$t[mu_idx[[x]]],
+                   x = mu$x[mu_idx[[x]]]),
+         zeta = zeta[[x]],
+         v = fourier_base_grid[[x]] %*% ortho_coef$Q,
+         sigma = sigma_list[[x]])
+  })
+
+}
+
+#' Computes the covariance function for some input eigenvalues
+#' and eigenfunctions using Mercer's theorem.
+#'
+#' @param x_val Vector of eigenvalues.
+#' @param y_fun Matrix, with each column containing the j-th eigenfunction
+#' @return Matrix, containing the K x K covariance function, where K
+#' is the number of rows of `y_fun`.
+#' @export
+
+cov_mercer <- function(x_val, y_fun) {
+
+  val_vec <- sweep(y_fun,
+                   MARGIN = 2,
+                   x_val,
+                   FUN = "*")
+
+  sapply(seq_along(x_val),
+         function(j) tcrossprod(val_vec[, j]), simplify = "array") |>
+    apply(MARGIN = c(1, 2), sum)
+
+}
+
 

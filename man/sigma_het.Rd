@@ -2,7 +2,7 @@
 % Please edit documentation in R/dgp.R
 \name{sigma_het}
 \alias{sigma_het}
-\title{Generates gaussian noise for function data}
+\title{Generates gaussian standard deviation for function data}
 \usage{
 sigma_het(sigma0, hetero = TRUE, t_vec)
 }
@@ -12,14 +12,14 @@ around.}
 
 \item{hetero}{Boolean, where TRUE indicate}
 
-\item{t_vec}{Vector, containing the sampling points for}
+\item{t_vec}{Vector, containing the evaluation points}
 }
 \value{
 A list containing the noise for each curve if \code{hetero = TRUE}. If
 not, a numeric will be returned.
 }
 \description{
-Generates possibly heteroscedastic gaussian noise of functional data,
-based on the observed time points of one curve.
+Generates possibly heteroscedastic standard deviation for gaussian nosie of
+functional data, based on the observed time points of one curve.
 Heteroscedasticity is generated using sin functions.
 }

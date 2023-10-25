@@ -2,10 +2,7 @@
 % Please edit documentation in R/parameters.R
 \name{estimate_parameters_FPCA}
 \alias{estimate_parameters_FPCA}
-\title{Estimate parameters for FPCA
-Performs estimate of parameters used in FPCA, in particular the local
-regularity, moments, noise, and density of sampling points. See
-separate internal functions for more details.}
+\title{Estimate parameters for FPCA}
 \usage{
 estimate_parameters_FPCA(
   data,
@@ -57,7 +54,6 @@ List, containing the following elements:
 }
 }
 \description{
-Estimate parameters for FPCA
 Performs estimate of parameters used in FPCA, in particular the local
 regularity, moments, noise, and density of sampling points. See
 separate internal functions for more details.

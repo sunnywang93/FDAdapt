@@ -8,20 +8,12 @@ FPCA_adapt(
   data,
   grid_smooth,
   grid_bw,
-  grid_param,
-  cv_set,
-  quantile,
+  param_list,
   inflate_bw = TRUE,
   center = TRUE,
-  interp_method = "linear",
   nelements = 10,
-  gamma_H,
-  gamma_L,
-  n_knots,
-  h_power,
-  intp_param,
-  true_params,
-  diag_cor = TRUE
+  diag_cor = TRUE,
+  h_power = 0.9
 )
 }
 \arguments{
@@ -36,13 +28,9 @@ will be computed at these sampling points.}
 
 \item{grid_bw}{Vector of points for bandwidth optimization.}
 
-\item{grid_param}{Vector of sampling points to estimate parameters.}
-
-\item{cv_set}{Numeric, containing the number of curves used for learning
-the cross-validation bandwidth in presmoothing.}
-
-\item{quantile}{Numeric, containing the quantile selected from the set of
-cross-validation bandwidths.}
+\item{param_list}{List of estimated parameters, for example from the
+function \code{estimate_parameters_FPCA}. Must be on the same grid as \code{grid_smooth},
+which can be interpolated for example using \code{intp_list}.}
 
 \item{inflate_bw}{Boolean, indicating whether to correct the bandwidth due
 to discretization error from estimating the regularity.}
@@ -52,24 +40,10 @@ to discretization error from estimating the regularity.}
 \item{nelements}{Numeric, indicating the number of eigen-elements to keep.
 Numeric must be at least 3.}
 
-\item{gamma_H}{Numeric, indicating the gamma to be used for estimation of
-\code{H}. See \code{estimate_regularity}.}
-
-\item{gamma_L}{Numeric, indicating the gamma to be used for estimation of
-\code{L}. See \code{estimate_regularity}.}
-
-\item{n_knots}{Numeric, number of knots used for smoothing H and L, where
-splines are used.}
+\item{diag_cor}{Boolean, indicating whether to perform diagonal correction.}
 
 \item{h_power}{Numeric, power to raise bandwidth to when estimating sigma
 for the purposes of diagonal correction for the covariance function.}
-
-\item{intp_param}{Boolean, where \code{TRUE} indicates using presmoothing + interpolation
-to estimate regularity parameters, as compared to only presmoothing.}
-
-\item{interp_type}{String, indicating the type of interpolation to perform
-for the parametrs from \code{grid_param} onto \code{grid_smooth}. Options include
-c("linear", "constant", "nearest", "spline", "cubic").}
 }
 \value{
 List, containing the following elements:
