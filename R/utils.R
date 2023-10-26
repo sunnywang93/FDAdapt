@@ -230,8 +230,15 @@ eigen_interpolate <- function(curves, grid_smooth, nelements) {
 
 }
 
-
-
+#' Normalise the sign of estimated eigenfunctions
+#'
+#' Since estimated eigenfunctions are only defined up to a sign, normalisation
+#' is required to have identical signs with the true eigenfunctions for
+#' the purposes of comparison.
+#'
+#' @param efunction Matrix containing the estimated eigenfunctions.
+#' @param efunction_true Matrix containing the true eigenfunctions.
+#' @return Matrix, containing the normalised eigenfunctions.
 #' @export
 normalise_sign <- function(efunction, efunction_true) {
   sapply(seq(ncol(efunction)), function(j) {
@@ -741,6 +748,37 @@ PACE_emp <- function(curves_learn, curves_online, sigma) {
       apply(2, function(v) t(v) %*% solve(cov_noisy[[id]]) %*% curves_cen[[id]])
   })
 
+
+}
+
+
+#' Orthonormalise the eigenfunction matrix
+#'
+#' Given a matrix where the columns are composed of the linearly
+#' independent eigenfunctions, the QR decomposition is returned. Normalisation
+#' is taking performed to make the eigenfunctions of unit norm, and have the
+#' same sign as the input eigenfunctions.
+#'
+#' @param X Matrix, containing the eigenfunctions in the columns to be
+#' orthonormalised.
+#' @param t Vector containing the evaluation points of the eigenfunction.
+#' @return Matrix, containing the orthonormalised eigenfunctions.
+#' @export
+
+ortho_funmat <- function(X, t) {
+
+  if(nrow(X) != length(t)) {
+    stop("Number of evaluation points do not match in t and X!")
+  }
+
+  Q <- qr.Q(qr(X))
+
+  norm_cst <- apply(Q, 2, function(x) sqrt(pracma::trapz(t, x**2)))
+
+  X_ortho <- sweep(Q, 2, norm_cst, FUN = "/")
+
+  normalise_sign(efunction = X_ortho,
+                 efunction_true = X)
 
 }
 
