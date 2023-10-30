@@ -141,8 +141,6 @@ estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
   t1 <- pmax(0, t2 - delta)
   t3 <- pmin(1, t2 + delta)
 
-  t2[t2 == 0] <- (min(t1) + min(t3)) / 2
-  t2[t2 == 1] <- (max(t1) + max(t3)) / 2
 
   if(intp) {
     # Extract Tmi points to use as presmoothing grid plus {0, 1}
@@ -191,13 +189,13 @@ estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
 
   # Compute H - Set lower and upper bounds to avoid degenerate values
   hurst <- (log(theta13) - log(theta12)) / (2 * log(2))
-  hurst <- pmax(pmin(hurst, 1), 0.2)
+  hurst <- pmax(pmin(hurst, 1), 0.1)
 
   hurst_fit <- stats::smooth.spline(x = t2,
                                     y = hurst,
                                     nknots = nknots)
 
-  hurst <- pmax(pmin(predict(hurst_fit, x = t2)$y, 1), 0.2)
+  hurst <- pmax(pmin(predict(hurst_fit, x = t2)$y, 1), 0.1)
 
   # Compute L2
   L_square <- theta13 / abs(t1 - t3)**(2 * hurst) |> pmax(0.1)
@@ -506,7 +504,89 @@ estimate_regularity_dense <- function(data, xout, method, gamma_H, gamma_L) {
 }
 
 
+#' Estimate the regularity of differentiable functional data
+#'
+#' For differentiable sample paths, the derivatives are used to estimate the
+#' local regularity parameters.
+#'
+#' @param data List, where each element represents a curve. Each curve
+#' must be a list with two entries:
+#'  * $t Sampling points.
+#'  * $x Observed points.
+#' @param grid Vector of sampling points to estimate the regularity parameters.
+#' @param bandwidth Numeric, containing the bandwidth value.
+#' @param gamma Numeric, power to be used in computing delta.
+#' @param drv Numeric, containing the r-th order derivative to be used in estimation.
+#' @returns List, containing the estimated H and L.
+#' @export
+estimate_regularity_deriv <- function(data, grid, bandwidth, gamma, drv) {
 
+  m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
+  delta <- exp(-log(m)**gamma)
+  t2 <- grid
+  t1 <- pmax(0, t2 - delta)
+  t3 <- pmin(1, t2 + delta)
+
+  drv_t1 <- purrr::map(data,
+                       ~KernSmooth::locpoly(x = .x$t,
+                                            y = .x$x,
+                                            drv = drv,
+                                            bandwidth = bandwidth,
+                                            gridsize = length(t1),
+                                            range.x = c(min(t1), max(t1))
+                                            )
+                       )
+
+
+  drv_t2 <- purrr::map(data,
+                       ~KernSmooth::locpoly(x = .x$t,
+                                            y = .x$x,
+                                            drv = drv,
+                                            bandwidth = bandwidth,
+                                            gridsize = length(t2),
+                                            range.x = c(min(t2), max(t2))
+                                            )
+                       )
+
+  drv_t3 <- purrr::map(data,
+                       ~KernSmooth::locpoly(x = .x$t,
+                                            y = .x$x,
+                                            drv = drv,
+                                            bandwidth = bandwidth,
+                                            gridsize = length(t3),
+                                            range.x = c(min(t3), max(t3))
+                                            )
+                       )
+
+  # Compute theta at (t1, t2)
+  theta12 <- purrr::map2(drv_t1, drv_t2, ~(.x$y - .y$y)**2) |>
+    rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace") |>
+    rapply(f = function(x) ifelse(!is.finite(x), 0, x), how = "replace") |>
+    (\(x) Reduce('+', x) / length(x))()
+
+  # Compute theta at (t1, t3)
+  theta13 <- purrr::map2(drv_t1, drv_t3, ~(.x$y - .y$y)**2) |>
+    rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace") |>
+    rapply(f = function(x) ifelse(!is.finite(x), 0, x), how = "replace") |>
+    (\(x) Reduce('+', x) / length(x))()
+
+
+  theta13 <- pmax(theta13, theta12)
+
+
+  # Compute H
+  hurst <- (log(theta13) - log(theta12)) / (2 * log(2))
+
+  # Compute L
+  L_square <- theta13 / abs(t1 - t3)**(2 * hurst)
+
+
+  list(H = hurst,
+       L = sqrt(L_square))
+
+
+
+}
 
 
 

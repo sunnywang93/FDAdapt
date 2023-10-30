@@ -494,7 +494,8 @@ intp_list <- function(list_in, xout) {
 
 
     # Append to list of parameters
-    c(list_smooth,
+    c(list(t = xout),
+      list_smooth,
       list_in[purrr::map_lgl(list_in, ~length(.x) == 1)],
       list2D_smooth
       )

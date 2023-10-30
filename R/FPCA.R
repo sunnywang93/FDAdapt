@@ -454,8 +454,12 @@ FPCA_adapt <- function(data, grid_smooth, grid_bw, param_list,
   fun_adapt <- sapply(seq_len(length(eigen_fun)),
                       function(j) eigen_fun[[j]][, j])
 
+  # Apply Gram-Schmidt to ensure orthonormality of eigenfunctions
+  fun_ortho <- ortho_funmat(X = fun_adapt,
+                            t = grid_smooth)
+
   list(evalues = val_adapt,
-       efunctions = fun_adapt,
+       efunctions = fun_ortho,
        bw_val = bw_adaptive$bw_val,
        bw_fun = bw_adaptive$bw_fun)
 
