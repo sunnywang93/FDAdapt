@@ -4,7 +4,7 @@
 \alias{smooth_curves}
 \title{Smooth curves with a given bandwidth}
 \usage{
-smooth_curves(data, grid, bandwidth)
+smooth_curves(data, grid, bandwidth, drv = 0, deg = drv + 1)
 }
 \arguments{
 \item{data}{List of curves, with each element/curve containing two entries:
@@ -15,14 +15,19 @@ smooth_curves(data, grid, bandwidth)
 
 \item{grid}{Vector / List containing the grid of points to smooth curves. If
 the input is a list, then smoothing is performed matching the i-th curve
-in \code{data} and the i-th element on the grid.}
+in \code{data} and the i-th element on the grid. Currently available only for the
+Nadaraya-Watson smoother.}
 
 \item{bandwidth}{Numeric containing the bandwidth.}
+
+\item{drv}{Numeric, the order of derivative to be estimated.}
+
+\item{deg}{Numeric, the order of polynomial fit to be used.}
 }
 \value{
 List, containing the smoothed curves.
 }
 \description{
-Performs smoothing of curves for a given bandwidth using the
-Nadaraya-Watson smoother.
+Performs smoothing of curves for a given bandwidth using the either the local
+linear or Nadaraya-Watson smoother.
 }

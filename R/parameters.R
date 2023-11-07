@@ -1,3 +1,49 @@
+#' Presmoothing with local polynomial estimator
+#'
+#' Performs presmoothing of functional data using a local polynomial estimator.
+#' A simple bandwidth rule of m / 3 is used, where m is the average number of
+#' sampling poins along the curves.
+#'
+#' @param data List of curves, with each element/curve containing two entries:
+#' - **$t** Vector of time points along each curve.
+#' - **$x** Vector of observed points along each curve.
+#' @param drv Numeric, the order of derivative to be estimated.
+#' @param xout Vector, the evaluation points of presmoothed curves.
+#' @return List, containing the presmoothed curves.
+#' @export
+
+
+presmoothing <- function(data, drv, xout, h) {
+
+  if(drv %% 1 != 0) {
+    warning("drv is not an integer! The integer part will be used.")
+  }
+
+
+  m_hat <- purrr::map_dbl(data, ~length(.x$t)) |>
+    mean()
+
+
+  presmoothed <- purrr::map(data,
+                            ~list(
+                              t = xout,
+                              x = KernSmooth::locpoly(x = .x$t,
+                                                      y = .x$x,
+                                                      drv = floor(drv),
+                                                      bandwidth = h,
+                                                      gridsize = length(xout),
+                                                      range.x = c(min(xout),
+                                                                  max(xout))
+                                                      )$y
+                              )
+                            )
+
+  presmoothed
+
+}
+
+
+
 #' Presmoothing with cross-validation
 #'
 #' Performs presmoothing of functional data, using a Nadaraya-Watson smoother
@@ -8,12 +54,12 @@
 #' @param data List of curves, with each element/curve containing two entries:
 #' - **$t** Vector of time points along each curve.
 #' - **$x** Vector of observed points along each curve.
-#' @param N0 Number of curves randomly selected for cross-validation.
-#' @param grid_smooth Grid of t2 points used to presmooth curves.
-#' @param q Quantile of cv bandwidth used to presmooth curves.
+#' @param N0 Numeric, number of curves randomly selected for cross-validation.
+#' @param grid_smooth Vector, grid of t2 points used to presmooth curves.
+#' @param q Numeric, quantile of cv bandwidth used to presmooth curves.
 #' @returns A list, containing two elements:
-#' - **$presmoothed_curves** Presmoothed curves.
-#' - **$cv_bandwidth** Bandwidth used.
+#' - **$presmoothed_curves** List of presmoothed curves.
+#' - **$cv_bandwidth** Numeric, containing the bandwidth used.
 #' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
 #' Functional Principal Components Analysis
 #' @export
@@ -43,38 +89,66 @@ presmoothing_FPCA <- function(data, N0, grid_smooth, q) {
 
 #' Smooth curves with a given bandwidth
 #'
-#' Performs smoothing of curves for a given bandwidth using the
-#' Nadaraya-Watson smoother.
+#' Performs smoothing of curves for a given bandwidth using the either the local
+#' linear or Nadaraya-Watson smoother.
 #'
 #' @param data List of curves, with each element/curve containing two entries:
 #' - **$t** Vector of time points along each curve.
 #' - **$x** Vector of observed points along each curve.
 #' @param grid Vector / List containing the grid of points to smooth curves. If
 #' the input is a list, then smoothing is performed matching the i-th curve
-#' in `data` and the i-th element on the grid.
+#' in `data` and the i-th element on the grid. Currently available only for the
+#' Nadaraya-Watson smoother.
 #' @param bandwidth Numeric containing the bandwidth.
+#' @param drv Numeric, the order of derivative to be estimated.
+#' @param deg Numeric, the order of polynomial fit to be used.
 #' @returns List, containing the smoothed curves.
 #' @export
 
-smooth_curves <- function(data, grid, bandwidth) {
+smooth_curves <- function(data, grid, bandwidth, drv = 0, deg = drv + 1) {
 
-  if(is.list(grid)) {
-    weights_num <- purrr::map2(data, grid,
-                               ~epa_kernel(outer(.x$t, .y, FUN = "-") / bandwidth))
+  if(drv > 0) {
+
+    smoothed_curves <- purrr::map(data,
+                                  ~KernSmooth::locpoly(x = .x$t,
+                                                       y = .x$x,
+                                                       drv = drv,
+                                                       degree = deg,
+                                                       bandwidth = bandwidth,
+                                                       gridsize = length(grid),
+                                                       range.x = c(min(grid),
+                                                                   max(grid))
+                                                       )
+                                  )
+
+    smoothed_curves
+
   } else {
-    weights_num <- purrr::map(data,
-                              ~epa_kernel(outer(.x$t, grid, FUN = "-") / bandwidth))
+
+    if(is.list(grid)) {
+      weights_num <- purrr::map2(data, grid,
+                                 ~epa_kernel(outer(.x$t, .y, FUN = "-") / bandwidth))
+    } else {
+      weights_num <- purrr::map(data,
+                                ~epa_kernel(outer(.x$t, grid, FUN = "-") / bandwidth))
+
+    }
+
+    weights_denom <- purrr::map(weights_num, ~colSums(.x))
+    weights <- purrr::map2(weights_num, weights_denom,
+                           ~sweep(.x, 2, .y, FUN = "/")) |>
+      rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace")
+
+    smoothed_curves <- purrr::map2(weights, data, ~c(crossprod(.x, .y$x)))
+
+    list(weights = weights,
+         smoothed_curves = smoothed_curves)
 
   }
 
-  weights_denom <- purrr::map(weights_num, ~colSums(.x))
-  weights <- purrr::map2(weights_num, weights_denom,
-                            ~sweep(.x, 2, .y, FUN = "/")) |>
-    rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace")
-
-  list(weights = weights,
-       smoothed_curves = purrr::map2(weights, data, ~c(crossprod(.x, .y$x))))
 }
+
+
 
 #' Estimate moments for bandwidth constants
 #'
@@ -124,16 +198,16 @@ estimate_moments <- function(presmoothed) {
 #' - **$x** Vector of observed points along each curve.
 #' @param grid Vector of points to estimate the regularity.
 #' @param bandwidth Bandwidth used to presmooth curves.
-#' @param intp Boolean, indicating whether to use interpolation method. If
-#' TRUE, presmoothing is first done at the observed time points with a
-#' prespecified bandwidth, before interpolating back on the t1, t2, t3 grid.
 #' @param gamma Numeric, power for computing delta.
-#' @param nknots Numeric, number of knots to be used for smoothing H & L.
+#' @param drv Numeric, order of derivative to be used for estimation.
+#' @param deg Numeric, order of polynomial to be used. Only taken into account
+#' when `drv > 0`.
+#' @param nknots Numeric, number of knots to be used for smoothing H.
 #' @references Wang S., Patilea V., Klutchnikoff N., (2023+) - Adaptive
 #' Functional Principal Components Analysis
 #' @export
-estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
-                                nknots = 15) {
+estimate_regularity <- function(data, grid, bandwidth, gamma,
+                                drv = 0, deg = drv, nknots = 15) {
 
   m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
   delta <- exp(-log(m)**gamma)
@@ -141,40 +215,54 @@ estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
   t1 <- pmax(0, t2 - delta)
   t3 <- pmin(1, t2 + delta)
 
+  if(drv > 0) {
 
-  if(intp) {
-    # Extract Tmi points to use as presmoothing grid plus {0, 1}
-    presmooth_grid <- purrr::map(data, ~c(0, .x$t, 1))
-    # Presmooth at Tmi points
-    presmoothed <- smooth_curves(data = data,
-                                 grid = presmooth_grid,
-                                 bandwidth = bandwidth)$smoothed_curves
-    # Interpolate back onto t1, t2, t3 grid
-    smoothed_t1 <- purrr::map2(data, presmoothed,
-                               ~interpolate1D(x = c(0, .x$t, 1),
-                                              y = .y,
-                                              xout = t1)$y)
+    t1_lp <- seq(min(t1[t1 != 0]),
+                 max(t1[t1 != 0]),
+                 l = length(t1[t1 != 0])
+                 )
 
+    smoothed_t1 <- smooth_curves(data = data,
+                                 grid = t1_lp,
+                                 bandwidth = bandwidth,
+                                 drv = drv,
+                                 deg = deg) |>
+      purrr::map(~interpolate1D(x = .x$x,
+                                y = .x$y,
+                                xout = t1)$y)
 
-    smoothed_t2 <- purrr::map2(data, presmoothed,
-                               ~interpolate1D(x = c(0, .x$t, 1),
-                                              y = .y,
-                                              xout = t2)$y)
+    smoothed_t2 <- smooth_curves(data = data,
+                                 grid = t2,
+                                 bandwidth = bandwidth,
+                                 drv = drv,
+                                 deg = deg) |>
+      purrr::map(~.x$y)
 
+    t3_lp <- seq(min(t3[t3 != 1]),
+                 max(t3[t3 != 1]),
+                 l = length(t3[t3 != 1])
+                 )
 
-    smoothed_t3 <- purrr::map2(data, presmoothed,
-                               ~interpolate1D(x = c(0, .x$t, 1),
-                                              y = .y,
-                                              xout = t3)$y)
+    smoothed_t3 <- smooth_curves(data = data,
+                                 grid = t3_lp,
+                                 bandwidth = bandwidth,
+                                 drv = drv,
+                                 deg = deg) |>
+      purrr::map(~interpolate1D(x = .x$x,
+                                y = .x$y,
+                                xout = t3)$y)
+
 
   } else {
-    # Smooth curves at t1 points
+
     smoothed_t1 <- smooth_curves(data, t1, bandwidth)$smoothed_curves
-    # Smooth curves at t2 points
+
     smoothed_t2 <- smooth_curves(data, t2, bandwidth)$smoothed_curves
-    # Smooth curves at t3 points
+
     smoothed_t3 <- smooth_curves(data, t3, bandwidth)$smoothed_curves
+
   }
+
 
   # Compute theta at (t1, t2)
   theta12 <- purrr::map2(smoothed_t1, smoothed_t2, ~(.x - .y)**2) |>
@@ -189,13 +277,14 @@ estimate_regularity <- function(data, grid, bandwidth, intp = TRUE, gamma,
 
   # Compute H - Set lower and upper bounds to avoid degenerate values
   hurst <- (log(theta13) - log(theta12)) / (2 * log(2))
-  hurst <- pmax(pmin(hurst, 1), 0.1)
+  hurst[!is.finite(hurst)] <- 1
+  hurst <- pmax(hurst, 0.1)
 
   hurst_fit <- stats::smooth.spline(x = t2,
                                     y = hurst,
                                     nknots = nknots)
 
-  hurst <- pmax(pmin(predict(hurst_fit, x = t2)$y, 1), 0.1)
+  hurst <- pmax(predict(hurst_fit, x = t2)$y, 0.1)
 
   # Compute L2
   L_square <- theta13 / abs(t1 - t3)**(2 * hurst) |> pmax(0.1)
@@ -299,13 +388,6 @@ estimate_density <- function(data) {
 #' - **$x** Vector of observed points along each curve.
 #' @param grid_points Vector containing the sampling points to estimate the
 #' parameters.
-#' @param n_learn Learning set used for cross-validation bandwidth in the
-#' presmoothing step. See also `presmoothing_FPCA`.
-#' @param h_quantile Quantile of bandwidth selected to presmooth curves.
-#' @param intp Boolean, indicating whether to use interpolation method for
-#' estimating Hölder parameters. If TRUE, presmoothing is first done at the
-#' observed time points using a cross-validation bandwidth, before interpolating
-#' back on a grid of t1, t2, t3 points used to estimate H and L.
 #' @param gamma_H Numeric, power to be used in computing delta for Hurst index.
 #' @param gamma_L Numeric, power to be used in computing delta for Holder constant.
 #' @param nknots Numeric, number of knots used for smoothing H and L.
@@ -321,38 +403,71 @@ estimate_density <- function(data) {
 #' Functional Principal Components Analysis
 #' @export
 
-estimate_parameters_FPCA <- function(data, grid_points, n_learn, h_quantile,
-                                     intp = TRUE, gamma_H, gamma_L, nknots) {
+estimate_parameters_FPCA <- function(data, grid_points, gamma_H,
+                                     gamma_L, nknots) {
 
-  # Presmooth curves
-  presmoothed_curves <- presmoothing_FPCA(data = data,
-                                          N0 = n_learn,
-                                          grid_smooth = grid_points,
-                                          q = h_quantile)
-  # Estimate H and L
-  hurst_estim <- estimate_regularity(data = data,
-                                     grid = grid_points,
-                                     bandwidth = presmoothed_curves$cv_bandwidth,
-                                     intp = intp,
-                                     gamma = gamma_H,
-                                     nknots = nknots)$H
-
-  const_estim <- estimate_regularity(data = data,
-                                     grid = grid_points,
-                                     bandwidth = presmoothed_curves$cv_bandwidth,
-                                     intp = intp,
-                                     gamma = gamma_L,
-                                     nknots = nknots)$L
-
-  # Estimate moments
-  moments <- estimate_moments(presmoothed = presmoothed_curves$presmoothed_curves)
 
   # Estimate conditional variance
   noise <- estimate_sigma(data = data,
                           sigma_grid = grid_points)
 
+  m_hat <- purrr::map_dbl(data, ~length(.x$t)) |>
+    mean()
+
+  # Presmooth curves
+  presmoothed <- presmoothing(data = data,
+                              drv = 0,
+                              xout = grid_points,
+                              h = (max(noise)^2)**(1/3) * m_hat^(-1/3))
+
+  # Estimate moments
+  moments <- estimate_moments(presmoothed = presmoothed)
+
+
   # Estimate density of time points
   sampling_density <- estimate_density(data = data)
+
+  counter <- 0
+
+  hurst_estim <- estimate_regularity(data = data,
+                                     grid = grid_points,
+                                     bandwidth = (max(noise)^2)**(1/3) * m_hat^(-1/3),
+                                     gamma = gamma_H,
+                                     drv = 0,
+                                     nknots = nknots)$H
+
+  const_estim <- estimate_regularity(data = data,
+                                     grid = grid_points,
+                                     bandwidth = (max(noise)^2)**(1/3) * m_hat^(-1/3),
+                                     gamma = gamma_L,
+                                     drv = 0,
+                                     nknots = nknots)$L
+
+  if(quantile(hurst_estim, 0.75) > 0.9) {
+
+    counter <- 1
+
+    hurst_estim <- estimate_regularity(data = data,
+                                       grid = grid_points,
+                                       bandwidth = (max(noise)^2)**(1/5) * m_hat^(-1/5),
+                                       gamma = gamma_H,
+                                       drv = 1,
+                                       deg = 2,
+                                       nknots = nknots)$H
+
+    const_estim <- estimate_regularity(data = data,
+                                       grid = grid_points,
+                                       bandwidth = (max(noise)^2)**(1/5) * m_hat^(-1/5),
+                                       gamma = gamma_L,
+                                       drv = 1,
+                                       deg = 2,
+                                       nknots = nknots)$L
+
+    counter <- ifelse(quantile(hurst_estim, 0.75) > 0.9, 2, counter) |>
+      unname()
+
+  }
+
 
   list(t = grid_points,
        H = hurst_estim,
@@ -360,7 +475,8 @@ estimate_parameters_FPCA <- function(data, grid_points, n_learn, h_quantile,
        sigma = noise,
        density = sampling_density,
        moments2 = moments$moment2,
-       moments2prod = moments$moment2prod)
+       moments2prod = moments$moment2prod,
+       counter = counter)
 
 }
 
@@ -504,89 +620,6 @@ estimate_regularity_dense <- function(data, xout, method, gamma_H, gamma_L) {
 }
 
 
-#' Estimate the regularity of differentiable functional data
-#'
-#' For differentiable sample paths, the derivatives are used to estimate the
-#' local regularity parameters.
-#'
-#' @param data List, where each element represents a curve. Each curve
-#' must be a list with two entries:
-#'  * $t Sampling points.
-#'  * $x Observed points.
-#' @param grid Vector of sampling points to estimate the regularity parameters.
-#' @param bandwidth Numeric, containing the bandwidth value.
-#' @param gamma Numeric, power to be used in computing delta.
-#' @param drv Numeric, containing the r-th order derivative to be used in estimation.
-#' @returns List, containing the estimated H and L.
-#' @export
-estimate_regularity_deriv <- function(data, grid, bandwidth, gamma, drv) {
-
-  m <- purrr::map_dbl(data, ~length(.x$t)) |> mean()
-  delta <- exp(-log(m)**gamma)
-  t2 <- grid
-  t1 <- pmax(0, t2 - delta)
-  t3 <- pmin(1, t2 + delta)
-
-  drv_t1 <- purrr::map(data,
-                       ~KernSmooth::locpoly(x = .x$t,
-                                            y = .x$x,
-                                            drv = drv,
-                                            bandwidth = bandwidth,
-                                            gridsize = length(t1),
-                                            range.x = c(min(t1), max(t1))
-                                            )
-                       )
-
-
-  drv_t2 <- purrr::map(data,
-                       ~KernSmooth::locpoly(x = .x$t,
-                                            y = .x$x,
-                                            drv = drv,
-                                            bandwidth = bandwidth,
-                                            gridsize = length(t2),
-                                            range.x = c(min(t2), max(t2))
-                                            )
-                       )
-
-  drv_t3 <- purrr::map(data,
-                       ~KernSmooth::locpoly(x = .x$t,
-                                            y = .x$x,
-                                            drv = drv,
-                                            bandwidth = bandwidth,
-                                            gridsize = length(t3),
-                                            range.x = c(min(t3), max(t3))
-                                            )
-                       )
-
-  # Compute theta at (t1, t2)
-  theta12 <- purrr::map2(drv_t1, drv_t2, ~(.x$y - .y$y)**2) |>
-    rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace") |>
-    rapply(f = function(x) ifelse(!is.finite(x), 0, x), how = "replace") |>
-    (\(x) Reduce('+', x) / length(x))()
-
-  # Compute theta at (t1, t3)
-  theta13 <- purrr::map2(drv_t1, drv_t3, ~(.x$y - .y$y)**2) |>
-    rapply(f = function(x) ifelse(is.nan(x), 0, x), how = "replace") |>
-    rapply(f = function(x) ifelse(!is.finite(x), 0, x), how = "replace") |>
-    (\(x) Reduce('+', x) / length(x))()
-
-
-  theta13 <- pmax(theta13, theta12)
-
-
-  # Compute H
-  hurst <- (log(theta13) - log(theta12)) / (2 * log(2))
-
-  # Compute L
-  L_square <- theta13 / abs(t1 - t3)**(2 * hurst)
-
-
-  list(H = hurst,
-       L = sqrt(L_square))
-
-
-
-}
 
 
 

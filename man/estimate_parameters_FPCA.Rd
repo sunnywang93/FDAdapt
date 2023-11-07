@@ -4,16 +4,7 @@
 \alias{estimate_parameters_FPCA}
 \title{Estimate parameters for FPCA}
 \usage{
-estimate_parameters_FPCA(
-  data,
-  grid_points,
-  n_learn,
-  h_quantile,
-  intp = TRUE,
-  gamma_H,
-  gamma_L,
-  nknots
-)
+estimate_parameters_FPCA(data, grid_points, gamma_H, gamma_L, nknots)
 }
 \arguments{
 \item{data}{List of curves, with each element/curve containing two entries:
@@ -24,16 +15,6 @@ estimate_parameters_FPCA(
 
 \item{grid_points}{Vector containing the sampling points to estimate the
 parameters.}
-
-\item{n_learn}{Learning set used for cross-validation bandwidth in the
-presmoothing step. See also \code{presmoothing_FPCA}.}
-
-\item{h_quantile}{Quantile of bandwidth selected to presmooth curves.}
-
-\item{intp}{Boolean, indicating whether to use interpolation method for
-estimating Hölder parameters. If TRUE, presmoothing is first done at the
-observed time points using a cross-validation bandwidth, before interpolating
-back on a grid of t1, t2, t3 points used to estimate H and L.}
 
 \item{gamma_H}{Numeric, power to be used in computing delta for Hurst index.}
 

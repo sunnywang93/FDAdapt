@@ -4,7 +4,15 @@
 \alias{estimate_regularity}
 \title{Estimated the local regularity based on presmoothing}
 \usage{
-estimate_regularity(data, grid, bandwidth, intp = TRUE, gamma, nknots = 15)
+estimate_regularity(
+  data,
+  grid,
+  bandwidth,
+  gamma,
+  drv = 0,
+  deg = drv,
+  nknots = 15
+)
 }
 \arguments{
 \item{data}{List of curves, with each element/curve containing two entries:
@@ -17,13 +25,14 @@ estimate_regularity(data, grid, bandwidth, intp = TRUE, gamma, nknots = 15)
 
 \item{bandwidth}{Bandwidth used to presmooth curves.}
 
-\item{intp}{Boolean, indicating whether to use interpolation method. If
-TRUE, presmoothing is first done at the observed time points with a
-prespecified bandwidth, before interpolating back on the t1, t2, t3 grid.}
-
 \item{gamma}{Numeric, power for computing delta.}
 
-\item{nknots}{Numeric, number of knots to be used for smoothing H & L.}
+\item{drv}{Numeric, order of derivative to be used for estimation.}
+
+\item{deg}{Numeric, order of polynomial to be used. Only taken into account
+when \code{drv > 0}.}
+
+\item{nknots}{Numeric, number of knots to be used for smoothing H.}
 }
 \description{
 Estimates the Hurst index \code{H} and Hölder constant \code{L} using presmoothing.

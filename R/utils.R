@@ -783,6 +783,21 @@ ortho_funmat <- function(X, t) {
 
 }
 
+#' Computes the polynomial vector for local polynomial estimation
+#'
+#' @param x Array, containing the evaluation points to compute over.
+#' @param l Integer, containing the order of the polynomial.
+#' @return Array.
+#' @export
+
+exp_vec <- function(x, l) {
+
+  l_vec <- seq(0, l, by = 1)
+
+  outer(l_vec, x, function(u, v) v**u / factorial(u))
+
+}
+
 
 
 

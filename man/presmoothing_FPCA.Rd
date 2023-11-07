@@ -13,17 +13,17 @@ presmoothing_FPCA(data, N0, grid_smooth, q)
 \item \strong{$x} Vector of observed points along each curve.
 }}
 
-\item{N0}{Number of curves randomly selected for cross-validation.}
+\item{N0}{Numeric, number of curves randomly selected for cross-validation.}
 
-\item{grid_smooth}{Grid of t2 points used to presmooth curves.}
+\item{grid_smooth}{Vector, grid of t2 points used to presmooth curves.}
 
-\item{q}{Quantile of cv bandwidth used to presmooth curves.}
+\item{q}{Numeric, quantile of cv bandwidth used to presmooth curves.}
 }
 \value{
 A list, containing two elements:
 \itemize{
-\item \strong{$presmoothed_curves} Presmoothed curves.
-\item \strong{$cv_bandwidth} Bandwidth used.
+\item \strong{$presmoothed_curves} List of presmoothed curves.
+\item \strong{$cv_bandwidth} Numeric, containing the bandwidth used.
 }
 }
 \description{
